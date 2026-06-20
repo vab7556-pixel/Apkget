@@ -1,0 +1,719 @@
+package {{PACKAGE}};
+
+import android.Manifest;
+import android.app.Activity;
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.graphics.ImageFormat;
+import android.graphics.SurfaceTexture;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.Face;
+import android.hardware.camera2.params.StreamConfigurationMap;
+import android.media.Image;
+import android.media.ImageReader;
+import android.os.Build;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.util.Range;
+import android.util.Size;
+import android.util.SparseIntArray;
+import android.view.Surface;
+import android.view.TextureView;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.widget.Toast;
+// NonNull annotation removed for compatibility
+import androidx.core.app.ActivityCompat;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Camera2 Helper - {{APP}}
+ * Advanced camera control with Camera2 API
+ * 
+ * === Camera Control ===
+ * Camera2.getCameraList();
+ * Camera2.openCamera(cameraId, callback);
+ * Camera2.closeCamera();
+ * Camera2.switchCamera();
+ * 
+ * === Capture ===
+ * Camera2.takePicture(callback);
+ * Camera2.takePictureWithSettings(width, height, quality, callback);
+ * 
+ * === Manual Controls ===
+ * Camera2.setManualFocus(focusDistance); // 0.0 to 1.0
+ * Camera2.setAutoFocus();
+ * Camera2.tapToFocus(x, y); // normalized 0-1
+ * Camera2.setExposure(compensation); // -2.0 to 2.0
+ * Camera2.setISO(isoValue);
+ * Camera2.setShutterSpeed(nanoseconds);
+ * Camera2.setWhiteBalance(mode); // auto, daylight, cloudy, tungsten, fluorescent
+ * Camera2.setZoom(zoomLevel); // 1.0 to maxZoom
+ * 
+ * === Features ===
+ * Camera2.enableFlash(mode); // off, on, auto, torch
+ * Camera2.enableFaceDetection(callback);
+ * Camera2.disableFaceDetection();
+ * Camera2.getCapabilities(cameraId);
+ * 
+ * === Info ===
+ * Camera2.getCurrentSettings();
+ * Camera2.getSupportedResolutions(cameraId);
+ */
+public class Camera2Helper {
+    private Activity activity;
+    private WebView webView;
+    private Handler mainHandler;
+    private HandlerThread backgroundThread;
+    private Handler backgroundHandler;
+    
+    private CameraManager cameraManager;
+    private CameraDevice cameraDevice;
+    private CameraCaptureSession captureSession;
+    private CaptureRequest.Builder previewRequestBuilder;
+    private ImageReader imageReader;
+    
+    private String currentCameraId;
+    private Size previewSize;
+    private int sensorOrientation;
+    private boolean flashSupported;
+    private float maxZoom = 1.0f;
+    private Range<Integer> isoRange;
+    private Range<Long> exposureTimeRange;
+    private Range<Integer> exposureCompensationRange;
+    
+    // Callbacks
+    private String captureCallback;
+    private String faceDetectionCallback;
+    private String cameraCallback;
+    
+    // State
+    private boolean isFaceDetectionEnabled = false;
+    private int currentFlashMode = CameraMetadata.FLASH_MODE_OFF;
+    private float currentZoom = 1.0f;
+    
+    private static final String APP_FOLDER = "{{APP}}";
+    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    static {
+        ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+    }
+
+    public Camera2Helper(Activity activity) {
+        this.activity = activity;
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.cameraManager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
+    }
+
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+
+    private File getAppFolder() {
+        File folder = new File(Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DCIM), APP_FOLDER);
+        if (!folder.exists()) folder.mkdirs();
+        return folder;
+    }
+
+    // ==================== CAMERA CONTROL ====================
+
+    @JavascriptInterface
+    public String getCameraList() {
+        try {
+            StringBuilder json = new StringBuilder("[");
+            String[] cameraIds = cameraManager.getCameraIdList();
+            
+            for (int i = 0; i < cameraIds.length; i++) {
+                if (i > 0) json.append(",");
+                String id = cameraIds[i];
+                CameraCharacteristics chars = cameraManager.getCameraCharacteristics(id);
+                Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
+                
+                json.append("{\"id\":\"").append(id).append("\"");
+                json.append(",\"facing\":\"");
+                if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    json.append("front");
+                } else if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    json.append("back");
+                } else {
+                    json.append("external");
+                }
+                json.append("\"}");
+            }
+            
+            json.append("]");
+            return json.toString();
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    @JavascriptInterface
+    public void openCamera(final String cameraId, final String callback) {
+        this.cameraCallback = callback;
+        this.currentCameraId = cameraId;
+        
+        startBackgroundThread();
+        
+        try {
+            if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED) {
+                fireCallback(callback, "error", "Camera permission not granted");
+                return;
+            }
+            
+            setupCameraOutputs(cameraId);
+            
+            cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
+                @Override
+                public void onOpened(CameraDevice camera) {
+                    cameraDevice = camera;
+                    fireCallback(callback, "opened", cameraId);
+                }
+
+                @Override
+                public void onDisconnected(CameraDevice camera) {
+                    camera.close();
+                    cameraDevice = null;
+                    fireCallback(callback, "disconnected", "");
+                }
+
+                @Override
+                public void onError(CameraDevice camera, int error) {
+                    camera.close();
+                    cameraDevice = null;
+                    fireCallback(callback, "error", "Camera error: " + error);
+                }
+            }, backgroundHandler);
+            
+        } catch (Exception e) {
+            fireCallback(callback, "error", e.getMessage());
+        }
+    }
+
+    private void setupCameraOutputs(String cameraId) throws CameraAccessException {
+        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+        
+        // Get sensor orientation
+        sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        
+        // Check flash support
+        Boolean flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+        flashSupported = flashAvailable != null && flashAvailable;
+        
+        // Get zoom range
+        Float maxDigitalZoom = characteristics.get(
+            CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+        maxZoom = maxDigitalZoom != null ? maxDigitalZoom : 1.0f;
+        
+        // Get ISO range
+        isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+        
+        // Get exposure time range
+        exposureTimeRange = characteristics.get(
+            CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+        
+        // Get exposure compensation range
+        exposureCompensationRange = characteristics.get(
+            CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE);
+        
+        // Get available sizes
+        StreamConfigurationMap map = characteristics.get(
+            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        
+        if (map != null) {
+            Size[] jpegSizes = map.getOutputSizes(ImageFormat.JPEG);
+            if (jpegSizes != null && jpegSizes.length > 0) {
+                // Choose largest size
+                previewSize = Collections.max(Arrays.asList(jpegSizes), new CompareSizesByArea());
+            }
+        }
+        
+        // Setup ImageReader
+        imageReader = ImageReader.newInstance(
+            previewSize.getWidth(), previewSize.getHeight(),
+            ImageFormat.JPEG, 2);
+        
+        imageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+            @Override
+            public void onImageAvailable(ImageReader reader) {
+                backgroundHandler.post(new ImageSaver(reader.acquireNextImage()));
+            }
+        }, backgroundHandler);
+    }
+
+    @JavascriptInterface
+    public void closeCamera() {
+        try {
+            if (captureSession != null) {
+                captureSession.close();
+                captureSession = null;
+            }
+            if (cameraDevice != null) {
+                cameraDevice.close();
+                cameraDevice = null;
+            }
+            if (imageReader != null) {
+                imageReader.close();
+                imageReader = null;
+            }
+            stopBackgroundThread();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void switchCamera() {
+        try {
+            String[] cameraIds = cameraManager.getCameraIdList();
+            if (cameraIds.length < 2) return;
+            
+            String newCameraId = currentCameraId.equals("0") ? "1" : "0";
+            closeCamera();
+            openCamera(newCameraId, cameraCallback);
+        } catch (Exception e) {}
+    }
+
+    // ==================== CAPTURE ====================
+
+    @JavascriptInterface
+    public void takePicture(String callback) {
+        takePictureWithSettings(0, 0, 90, callback);
+    }
+
+    @JavascriptInterface
+    public void takePictureWithSettings(int width, int height, int quality, String callback) {
+        this.captureCallback = callback;
+        
+        if (cameraDevice == null) {
+            fireCallback(callback, "error", "Camera not opened");
+            return;
+        }
+        
+        try {
+            CaptureRequest.Builder captureBuilder = cameraDevice.createCaptureRequest(
+                CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureBuilder.addTarget(imageReader.getSurface());
+            
+            // Set auto-focus
+            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            
+            // Set flash
+            if (flashSupported) {
+                captureBuilder.set(CaptureRequest.FLASH_MODE, currentFlashMode);
+            }
+            
+            // Set orientation
+            int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
+            
+            // Set quality
+            captureBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) quality);
+            
+            // Create capture session if needed
+            if (captureSession == null) {
+                List<Surface> surfaces = Arrays.asList(imageReader.getSurface());
+                cameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
+                    @Override
+                    public void onConfigured(CameraCaptureSession session) {
+                        captureSession = session;
+                        try {
+                            session.capture(captureBuilder.build(), captureCallback2, backgroundHandler);
+                        } catch (Exception e) {
+                            fireCallback(captureCallback, "error", e.getMessage());
+                        }
+                    }
+
+                    @Override
+                    public void onConfigureFailed(CameraCaptureSession session) {
+                        fireCallback(captureCallback, "error", "Session configuration failed");
+                    }
+                }, backgroundHandler);
+            } else {
+                captureSession.capture(captureBuilder.build(), captureCallback2, backgroundHandler);
+            }
+            
+        } catch (Exception e) {
+            fireCallback(callback, "error", e.getMessage());
+        }
+    }
+
+    private CameraCaptureSession.CaptureCallback captureCallback2 = 
+        new CameraCaptureSession.CaptureCallback() {
+            @Override
+            public void onCaptureCompleted(CameraCaptureSession session,
+                                          CaptureRequest request,
+                                          TotalCaptureResult result) {
+                // Image will be saved by ImageSaver
+            }
+        };
+
+    private class ImageSaver implements Runnable {
+        private final Image image;
+
+        ImageSaver(Image image) {
+            this.image = image;
+        }
+
+        @Override
+        public void run() {
+            String filename = "IMG_" + new SimpleDateFormat("yyyyMMdd_HHmmss", 
+                Locale.US).format(new Date()) + ".jpg";
+            File file = new File(getAppFolder(), filename);
+            
+            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            
+            FileOutputStream output = null;
+            try {
+                output = new FileOutputStream(file);
+                output.write(bytes);
+                fireCallback(captureCallback, "success", file.getAbsolutePath());
+            } catch (Exception e) {
+                fireCallback(captureCallback, "error", e.getMessage());
+            } finally {
+                image.close();
+                try { if (output != null) output.close(); } catch (Exception e) {}
+            }
+        }
+    }
+
+    // ==================== MANUAL CONTROLS ====================
+
+    @JavascriptInterface
+    public void setManualFocus(float focusDistance) {
+        if (previewRequestBuilder == null) return;
+        try {
+            // focusDistance: 0.0 (infinity) to 1.0 (closest)
+            Float minFocus = 0f;
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(currentCameraId);
+            Float minFocusDist = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+            if (minFocusDist != null) minFocus = minFocusDist;
+            
+            float actualFocus = focusDistance * minFocus;
+            
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_OFF);
+            previewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, actualFocus);
+            
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setAutoFocus() {
+        if (previewRequestBuilder == null) return;
+        try {
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setExposureCompensation(float ev) {
+        if (previewRequestBuilder == null || exposureCompensationRange == null) return;
+        try {
+            // ev: -2.0 to 2.0 typically
+            int minEv = exposureCompensationRange.getLower();
+            int maxEv = exposureCompensationRange.getUpper();
+            int compensation = (int) (ev * (maxEv - minEv) / 4.0f);
+            compensation = Math.max(minEv, Math.min(maxEv, compensation));
+            
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, compensation);
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setISO(int iso) {
+        if (previewRequestBuilder == null || isoRange == null) return;
+        try {
+            iso = Math.max(isoRange.getLower(), Math.min(isoRange.getUpper(), iso));
+            
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_OFF);
+            previewRequestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setShutterSpeed(long nanoseconds) {
+        if (previewRequestBuilder == null || exposureTimeRange == null) return;
+        try {
+            nanoseconds = Math.max(exposureTimeRange.getLower(),
+                Math.min(exposureTimeRange.getUpper(), nanoseconds));
+            
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_OFF);
+            previewRequestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, nanoseconds);
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setWhiteBalance(String mode) {
+        if (previewRequestBuilder == null) return;
+        try {
+            int wbMode;
+            switch (mode.toLowerCase()) {
+                case "daylight": wbMode = CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT; break;
+                case "cloudy": wbMode = CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT; break;
+                case "tungsten": wbMode = CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT; break;
+                case "fluorescent": wbMode = CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT; break;
+                case "auto":
+                default: wbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO; break;
+            }
+            
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, wbMode);
+            updatePreview();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void setZoom(float zoomLevel) {
+        if (previewRequestBuilder == null) return;
+        try {
+            currentZoom = Math.max(1.0f, Math.min(maxZoom, zoomLevel));
+            
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(currentCameraId);
+            android.graphics.Rect sensorRect = chars.get(
+                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+            
+            if (sensorRect != null) {
+                int centerX = sensorRect.width() / 2;
+                int centerY = sensorRect.height() / 2;
+                int deltaX = (int) (sensorRect.width() / (2 * currentZoom));
+                int deltaY = (int) (sensorRect.height() / (2 * currentZoom));
+                
+                android.graphics.Rect zoomRect = new android.graphics.Rect(
+                    centerX - deltaX, centerY - deltaY,
+                    centerX + deltaX, centerY + deltaY);
+                
+                previewRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, zoomRect);
+                updatePreview();
+            }
+        } catch (Exception e) {}
+    }
+
+    // ==================== FLASH ====================
+
+    @JavascriptInterface
+    public void enableFlash(String mode) {
+        if (!flashSupported) return;
+        
+        switch (mode.toLowerCase()) {
+            case "on": currentFlashMode = CameraMetadata.FLASH_MODE_SINGLE; break;
+            case "torch": currentFlashMode = CameraMetadata.FLASH_MODE_TORCH; break;
+            case "auto":
+                if (previewRequestBuilder != null) {
+                    previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+                }
+                return;
+            case "off":
+            default: currentFlashMode = CameraMetadata.FLASH_MODE_OFF; break;
+        }
+        
+        if (previewRequestBuilder != null) {
+            previewRequestBuilder.set(CaptureRequest.FLASH_MODE, currentFlashMode);
+            updatePreview();
+        }
+    }
+
+    // ==================== FACE DETECTION ====================
+
+    @JavascriptInterface
+    public void enableFaceDetection(String callback) {
+        this.faceDetectionCallback = callback;
+        this.isFaceDetectionEnabled = true;
+        
+        if (previewRequestBuilder == null) return;
+        
+        try {
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(currentCameraId);
+            int[] faceModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES);
+            
+            if (faceModes != null && faceModes.length > 1) {
+                previewRequestBuilder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+                    CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE);
+                updatePreview();
+            }
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public void disableFaceDetection() {
+        isFaceDetectionEnabled = false;
+        if (previewRequestBuilder != null) {
+            previewRequestBuilder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+                CameraMetadata.STATISTICS_FACE_DETECT_MODE_OFF);
+            updatePreview();
+        }
+    }
+
+    // ==================== INFO ====================
+
+    @JavascriptInterface
+    public String getCapabilities(String cameraId) {
+        try {
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraId);
+            StringBuilder json = new StringBuilder("{");
+            
+            // Facing
+            Integer facing = chars.get(CameraCharacteristics.LENS_FACING);
+            json.append("\"facing\":\"");
+            json.append(facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back");
+            json.append("\"");
+            
+            // Flash
+            Boolean flash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            json.append(",\"flashSupported\":").append(flash != null && flash);
+            
+            // Max zoom
+            Float zoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM);
+            json.append(",\"maxZoom\":").append(zoom != null ? zoom : 1.0f);
+            
+            // ISO range
+            Range<Integer> iso = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+            if (iso != null) {
+                json.append(",\"isoRange\":{\"min\":").append(iso.getLower());
+                json.append(",\"max\":").append(iso.getUpper()).append("}");
+            }
+            
+            // Exposure time range
+            Range<Long> exposure = chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+            if (exposure != null) {
+                json.append(",\"exposureTimeRange\":{\"min\":").append(exposure.getLower());
+                json.append(",\"max\":").append(exposure.getUpper()).append("}");
+            }
+            
+            // Face detection
+            int[] faceModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES);
+            json.append(",\"faceDetectionSupported\":").append(faceModes != null && faceModes.length > 1);
+            
+            json.append("}");
+            return json.toString();
+        } catch (Exception e) {
+            return "{\"error\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    @JavascriptInterface
+    public String getSupportedResolutions(String cameraId) {
+        try {
+            CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraId);
+            StreamConfigurationMap map = chars.get(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            
+            if (map == null) return "[]";
+            
+            Size[] sizes = map.getOutputSizes(ImageFormat.JPEG);
+            StringBuilder json = new StringBuilder("[");
+            
+            for (int i = 0; i < sizes.length; i++) {
+                if (i > 0) json.append(",");
+                json.append("{\"width\":").append(sizes[i].getWidth());
+                json.append(",\"height\":").append(sizes[i].getHeight()).append("}");
+            }
+            
+            json.append("]");
+            return json.toString();
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    @JavascriptInterface
+    public String getCurrentSettings() {
+        StringBuilder json = new StringBuilder("{");
+        json.append("\"cameraId\":\"").append(currentCameraId).append("\"");
+        json.append(",\"zoom\":").append(currentZoom);
+        json.append(",\"maxZoom\":").append(maxZoom);
+        json.append(",\"flashSupported\":").append(flashSupported);
+        json.append(",\"faceDetectionEnabled\":").append(isFaceDetectionEnabled);
+        json.append("}");
+        return json.toString();
+    }
+
+    // ==================== HELPERS ====================
+
+    private void updatePreview() {
+        if (captureSession == null || previewRequestBuilder == null) return;
+        try {
+            captureSession.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler);
+        } catch (Exception e) {}
+    }
+
+    private int getOrientation(int rotation) {
+        return (ORIENTATIONS.get(rotation) + sensorOrientation + 270) % 360;
+    }
+
+    private void startBackgroundThread() {
+        backgroundThread = new HandlerThread("CameraBackground");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
+    }
+
+    private void stopBackgroundThread() {
+        if (backgroundThread != null) {
+            backgroundThread.quitSafely();
+            try {
+                backgroundThread.join();
+                backgroundThread = null;
+                backgroundHandler = null;
+            } catch (Exception e) {}
+        }
+    }
+
+    private void fireCallback(final String callback, final String event, final String data) {
+        if (webView == null || callback == null) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                String escapedData = data.replace("\\", "\\\\")
+                                        .replace("\"", "\\\"");
+                String js = "javascript:" + callback + "(\"" + event + "\", \"" + escapedData + "\")";
+                webView.evaluateJavascript(js, null);
+            }
+        });
+    }
+
+    static class CompareSizesByArea implements Comparator<Size> {
+        @Override
+        public int compare(Size lhs, Size rhs) {
+            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
+                              (long) rhs.getWidth() * rhs.getHeight());
+        }
+    }
+
+    public void destroy() {
+        closeCamera();
+    }
+}
+

@@ -1,0 +1,348 @@
+package {{PACKAGE}};
+
+import android.content.Context;
+import android.util.Log;
+import dalvik.system.DexClassLoader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.lang.reflect.Method;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Advanced Injection Engine - Academic Research PoC
+ * Demonstrates runtime DEX loading and method injection techniques
+ * This engine allows dynamic loading and execution of code at runtime
+ * 
+ * NOTE: This is for academic proof-of-concept research only
+ */
+public class AdvancedInjectionEngine {
+    private static final String TAG = "InjectionEngine";
+    private Context context;
+    private DexClassLoader dexLoader;
+    private File cacheDir;
+    private Map<String, Class<?>> loadedClasses;
+    private Map<String, Object> loadedInstances;
+
+    public AdvancedInjectionEngine(Context context) {
+        this.context = context;
+        this.cacheDir = context.getCacheDir();
+        this.loadedClasses = new HashMap<>();
+        this.loadedInstances = new HashMap<>();
+        
+        // Ensure cache directory exists
+        if (!cacheDir.exists()) {
+            cacheDir.mkdirs();
+        }
+        
+        Log.d(TAG, "Injection Engine initialized");
+    }
+
+    /**
+     * Load DEX file from assets and decrypt if needed
+     */
+    public boolean loadDexFromAssets(String assetName, String dexFileName, byte[] decryptionKey) {
+        try {
+            InputStream assetStream = context.getAssets().open(assetName);
+            File dexFile = new File(cacheDir, dexFileName);
+            
+            // Decrypt if key provided
+            if (decryptionKey != null && decryptionKey.length > 0) {
+                decryptAsset(assetStream, dexFile, decryptionKey);
+            } else {
+                // Copy directly
+                FileOutputStream fos = new FileOutputStream(dexFile);
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = assetStream.read(buffer)) != -1) {
+                    fos.write(buffer, 0, bytesRead);
+                }
+                fos.close();
+            }
+            assetStream.close();
+            
+            Log.d(TAG, "DEX file extracted: " + dexFile.getAbsolutePath());
+            return loadDexFile(dexFile.getAbsolutePath());
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to load DEX from assets: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Decrypt asset file using XOR cipher
+     */
+    private void decryptAsset(InputStream input, File output, byte[] key) throws Exception {
+        FileOutputStream fos = new FileOutputStream(output);
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        int keyIndex = 0;
+        
+        while ((bytesRead = input.read(buffer)) != -1) {
+            for (int i = 0; i < bytesRead; i++) {
+                buffer[i] = (byte) (buffer[i] ^ key[keyIndex % key.length]);
+                keyIndex++;
+            }
+            fos.write(buffer, 0, bytesRead);
+        }
+        
+        fos.close();
+    }
+
+    /**
+     * Load DEX file into memory using DexClassLoader
+     */
+    public boolean loadDexFile(String dexPath) {
+        try {
+            File optimizedDir = new File(cacheDir, "optimized");
+            if (!optimizedDir.exists()) {
+                optimizedDir.mkdirs();
+            }
+            
+            String libraryPath = context.getApplicationInfo().nativeLibraryDir;
+            
+            dexLoader = new DexClassLoader(
+                dexPath,
+                optimizedDir.getAbsolutePath(),
+                libraryPath,
+                context.getClassLoader()
+            );
+            
+            Log.d(TAG, "DEX file loaded successfully: " + dexPath);
+            return true;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to load DEX file: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Load a class from the loaded DEX
+     */
+    public Class<?> loadClass(String className) {
+        if (loadedClasses.containsKey(className)) {
+            return loadedClasses.get(className);
+        }
+        
+        try {
+            if (dexLoader == null) {
+                Log.e(TAG, "DEX loader not initialized");
+                return null;
+            }
+            
+            Class<?> clazz = dexLoader.loadClass(className);
+            loadedClasses.put(className, clazz);
+            Log.d(TAG, "Class loaded: " + className);
+            return clazz;
+            
+        } catch (ClassNotFoundException e) {
+            Log.e(TAG, "Class not found: " + className);
+            return null;
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading class: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Create instance of a loaded class
+     */
+    public Object createInstance(String className, Object... args) {
+        try {
+            Class<?> clazz = loadClass(className);
+            if (clazz == null) {
+                return null;
+            }
+            
+            // Find appropriate constructor
+            Class<?>[] paramTypes = new Class[args.length];
+            for (int i = 0; i < args.length; i++) {
+                paramTypes[i] = args[i].getClass();
+            }
+            
+            java.lang.reflect.Constructor<?> constructor = clazz.getConstructor(paramTypes);
+            Object instance = constructor.newInstance(args);
+            
+            Log.d(TAG, "Instance created: " + className);
+            return instance;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to create instance: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Invoke method on an object using reflection
+     */
+    public Object invokeMethod(Object target, String methodName, Class<?>[] paramTypes, Object... args) {
+        try {
+            Method method = target.getClass().getDeclaredMethod(methodName, paramTypes);
+            method.setAccessible(true);
+            Object result = method.invoke(target, args);
+            Log.d(TAG, "Method invoked: " + methodName);
+            return result;
+            
+        } catch (NoSuchMethodException e) {
+            Log.e(TAG, "Method not found: " + methodName);
+            return null;
+        } catch (Exception e) {
+            Log.e(TAG, "Error invoking method: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Inject code into running process using reflection
+     */
+    public boolean injectCode(String className, String methodName, Object target) {
+        try {
+            Class<?> injectClass = loadClass(className);
+            if (injectClass == null) {
+                return false;
+            }
+            
+            // Create instance of injector class
+            Object injector = injectClass.newInstance();
+            
+            // Find injection method
+            Method injectMethod = injectClass.getDeclaredMethod(methodName, target.getClass());
+            injectMethod.setAccessible(true);
+            
+            // Execute injection
+            injectMethod.invoke(injector, target);
+            
+            Log.d(TAG, "Code injection successful: " + className + "." + methodName);
+            return true;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Code injection failed: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Load and cache instance for reuse
+     */
+    public Object getOrCreateInstance(String className, Object... args) {
+        if (loadedInstances.containsKey(className)) {
+            return loadedInstances.get(className);
+        }
+        
+        Object instance = createInstance(className, args);
+        if (instance != null) {
+            loadedInstances.put(className, instance);
+        }
+        
+        return instance;
+    }
+
+    /**
+     * Execute shell command and return result
+     */
+    public String executeShell(String command) {
+        try {
+            Process process = Runtime.getRuntime().exec(command);
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream())
+            );
+            
+            StringBuilder output = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+            
+            process.waitFor();
+            return output.toString();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Shell execution failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Calculate file hash for integrity checking
+     */
+    public String calculateHash(File file) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            FileInputStream fis = new FileInputStream(file);
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+            
+            fis.close();
+            
+            byte[] hash = digest.digest();
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            
+            return hexString.toString();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Hash calculation failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Clean up loaded resources
+     */
+    public void cleanup() {
+        loadedClasses.clear();
+        loadedInstances.clear();
+        dexLoader = null;
+        
+        // Clean cache directory
+        if (cacheDir.exists()) {
+            deleteRecursive(cacheDir);
+            cacheDir.mkdirs();
+        }
+        
+        Log.d(TAG, "Injection engine cleaned up");
+    }
+
+    /**
+     * Recursively delete directory
+     */
+    private void deleteRecursive(File fileOrDirectory) {
+        if (fileOrDirectory.isDirectory()) {
+            File[] children = fileOrDirectory.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        fileOrDirectory.delete();
+    }
+
+    /**
+     * Check if DEX loader is ready
+     */
+    public boolean isReady() {
+        return dexLoader != null;
+    }
+}

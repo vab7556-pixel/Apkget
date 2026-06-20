@@ -1,0 +1,412 @@
+package {{PACKAGE}};
+
+import android.content.Context;
+import android.webkit.WebView;
+import android.webkit.JavascriptInterface;
+import android.os.Handler;
+import android.os.Looper;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.provider.Settings;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.os.StatFs;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import org.json.JSONObject;
+import org.json.JSONArray;
+import java.security.MessageDigest;
+import java.util.Base64;
+
+/**
+ * Advanced Bridge Extensions
+ * جسر متقدم للتواصل مع النظام والتطبيقات الأخرى
+ */
+public class ABXBridge {
+    private Context context;
+    private WebView webView;
+    private Handler mainHandler;
+    private Map<String, Object> sessionData;
+    
+    public ABXBridge(Context context) {
+        this.context = context;
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.sessionData = new HashMap<>();
+    }
+    
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+    
+    /**
+     * الحصول على معلومات الجهاز المتقدمة
+     */
+    @JavascriptInterface
+    public String getAdvancedDeviceInfo() {
+        try {
+            JSONObject deviceInfo = new JSONObject();
+            
+            // معلومات الجهاز الأساسية
+            deviceInfo.put("manufacturer", Build.MANUFACTURER);
+            deviceInfo.put("model", Build.MODEL);
+            deviceInfo.put("device", Build.DEVICE);
+            deviceInfo.put("product", Build.PRODUCT);
+            deviceInfo.put("brand", Build.BRAND);
+            deviceInfo.put("hardware", Build.HARDWARE);
+            
+            // معلومات النظام
+            deviceInfo.put("androidVersion", Build.VERSION.RELEASE);
+            deviceInfo.put("apiLevel", Build.VERSION.SDK_INT);
+            deviceInfo.put("buildId", Build.ID);
+            deviceInfo.put("fingerprint", Build.FINGERPRINT);
+            
+            // معلومات الذاكرة والتخزين
+            Runtime runtime = Runtime.getRuntime();
+            deviceInfo.put("totalMemory", runtime.totalMemory());
+            deviceInfo.put("freeMemory", runtime.freeMemory());
+            deviceInfo.put("maxMemory", runtime.maxMemory());
+            
+            // معلومات التخزين
+            StatFs stat = new StatFs(Environment.getExternalStorageDirectory().getPath());
+            long totalBytes = stat.getTotalBytes();
+            long freeBytes = stat.getAvailableBytes();
+            deviceInfo.put("totalStorage", totalBytes);
+            deviceInfo.put("freeStorage", freeBytes);
+            
+            // معلومات الشاشة
+            android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+            deviceInfo.put("screenWidth", metrics.widthPixels);
+            deviceInfo.put("screenHeight", metrics.heightPixels);
+            deviceInfo.put("screenDensity", metrics.density);
+            deviceInfo.put("screenDpi", metrics.densityDpi);
+            
+            return deviceInfo.toString();
+        } catch (Exception e) {
+            return "{\"error\":\"" + e.getMessage() + "\"}";
+        }
+    }
+    
+    /**
+     * إدارة البيانات المحلية المتقدمة
+     */
+    @JavascriptInterface
+    public void setSecureData(String key, String value, String password) {
+        try {
+            String encryptedValue = encryptData(value, password);
+            File dataDir = new File(context.getFilesDir(), "abx_secure");
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+            
+            File dataFile = new File(dataDir, hashKey(key) + ".dat");
+            FileWriter writer = new FileWriter(dataFile);
+            writer.write(encryptedValue);
+            writer.close();
+            
+            notifyWebView("abx_data_saved", key);
+        } catch (Exception e) {
+            notifyWebView("abx_data_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * استرجاع البيانات المحمية
+     */
+    @JavascriptInterface
+    public void getSecureData(String key, String password) {
+        try {
+            File dataDir = new File(context.getFilesDir(), "abx_secure");
+            File dataFile = new File(dataDir, hashKey(key) + ".dat");
+            
+            if (!dataFile.exists()) {
+                notifyWebView("abx_data_result", "{\"key\":\"" + key + "\",\"value\":null}");
+                return;
+            }
+            
+            BufferedReader reader = new BufferedReader(new FileReader(dataFile));
+            String encryptedValue = reader.readLine();
+            reader.close();
+            
+            String decryptedValue = decryptData(encryptedValue, password);
+            notifyWebView("abx_data_result", "{\"key\":\"" + key + "\",\"value\":\"" + decryptedValue + "\"}");
+        } catch (Exception e) {
+            notifyWebView("abx_data_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * إدارة الجلسة المتقدمة
+     */
+    @JavascriptInterface
+    public void setSessionData(String key, String value) {
+        sessionData.put(key, value);
+        notifyWebView("abx_session_updated", key);
+    }
+    
+    @JavascriptInterface
+    public String getSessionData(String key) {
+        Object value = sessionData.get(key);
+        return value != null ? value.toString() : null;
+    }
+    
+    @JavascriptInterface
+    public String getAllSessionData() {
+        try {
+            JSONObject sessionJson = new JSONObject();
+            for (Map.Entry<String, Object> entry : sessionData.entrySet()) {
+                sessionJson.put(entry.getKey(), entry.getValue());
+            }
+            return sessionJson.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+    
+    /**
+     * التحكم في التطبيقات الأخرى
+     */
+    @JavascriptInterface
+    public void launchApp(String packageName) {
+        try {
+            Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(packageName);
+            if (launchIntent != null) {
+                context.startActivity(launchIntent);
+                notifyWebView("abx_app_launched", packageName);
+            } else {
+                notifyWebView("abx_app_error", "App not found: " + packageName);
+            }
+        } catch (Exception e) {
+            notifyWebView("abx_app_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * الحصول على قائمة التطبيقات المثبتة
+     */
+    @JavascriptInterface
+    public void getInstalledApps() {
+        try {
+            PackageManager pm = context.getPackageManager();
+            List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            
+            JSONArray appsArray = new JSONArray();
+            for (android.content.pm.ApplicationInfo app : apps) {
+                if (pm.getLaunchIntentForPackage(app.packageName) != null) {
+                    JSONObject appInfo = new JSONObject();
+                    appInfo.put("packageName", app.packageName);
+                    appInfo.put("name", pm.getApplicationLabel(app).toString());
+                    appInfo.put("enabled", app.enabled);
+                    appsArray.put(appInfo);
+                }
+            }
+            
+            notifyWebView("abx_apps_list", appsArray.toString());
+        } catch (Exception e) {
+            notifyWebView("abx_apps_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * فتح إعدادات النظام
+     */
+    @JavascriptInterface
+    public void openSystemSettings(String settingType) {
+        try {
+            Intent intent = new Intent();
+            
+            switch (settingType) {
+                case "wifi":
+                    intent.setAction(Settings.ACTION_WIFI_SETTINGS);
+                    break;
+                case "bluetooth":
+                    intent.setAction(Settings.ACTION_BLUETOOTH_SETTINGS);
+                    break;
+                case "location":
+                    intent.setAction(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+                    break;
+                case "app_info":
+                    intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.parse("package:" + context.getPackageName()));
+                    break;
+                case "security":
+                    intent.setAction(Settings.ACTION_SECURITY_SETTINGS);
+                    break;
+                default:
+                    intent.setAction(Settings.ACTION_SETTINGS);
+                    break;
+            }
+            
+            context.startActivity(intent);
+            notifyWebView("abx_settings_opened", settingType);
+        } catch (Exception e) {
+            notifyWebView("abx_settings_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * إدارة الملفات المتقدمة
+     */
+    @JavascriptInterface
+    public void createFile(String fileName, String content, String directory) {
+        try {
+            File dir;
+            if ("external".equals(directory)) {
+                dir = Environment.getExternalStorageDirectory();
+            } else if ("cache".equals(directory)) {
+                dir = context.getCacheDir();
+            } else {
+                dir = context.getFilesDir();
+            }
+            
+            File file = new File(dir, fileName);
+            FileWriter writer = new FileWriter(file);
+            writer.write(content);
+            writer.close();
+            
+            notifyWebView("abx_file_created", file.getAbsolutePath());
+        } catch (Exception e) {
+            notifyWebView("abx_file_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * قراءة الملفات
+     */
+    @JavascriptInterface
+    public void readFile(String filePath) {
+        try {
+            File file = new File(filePath);
+            if (!file.exists()) {
+                notifyWebView("abx_file_error", "File not found: " + filePath);
+                return;
+            }
+            
+            BufferedReader reader = new BufferedReader(new FileReader(file));
+            StringBuilder content = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append("\n");
+            }
+            reader.close();
+            
+            JSONObject result = new JSONObject();
+            result.put("path", filePath);
+            result.put("content", content.toString());
+            result.put("size", file.length());
+            
+            notifyWebView("abx_file_content", result.toString());
+        } catch (Exception e) {
+            notifyWebView("abx_file_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * مراقبة استخدام الشبكة
+     */
+    @JavascriptInterface
+    public void getNetworkInfo() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) 
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+            
+            JSONObject networkInfo = new JSONObject();
+            if (activeNetwork != null) {
+                networkInfo.put("connected", activeNetwork.isConnected());
+                networkInfo.put("type", activeNetwork.getTypeName());
+                networkInfo.put("subtype", activeNetwork.getSubtypeName());
+                networkInfo.put("roaming", activeNetwork.isRoaming());
+                networkInfo.put("available", activeNetwork.isAvailable());
+            } else {
+                networkInfo.put("connected", false);
+            }
+            
+            notifyWebView("abx_network_info", networkInfo.toString());
+        } catch (Exception e) {
+            notifyWebView("abx_network_error", e.getMessage());
+        }
+    }
+    
+    /**
+     * تشفير البيانات
+     */
+    private String encryptData(String data, String password) {
+        try {
+            // تشفير بسيط XOR مع hash للكلمة السرية
+            byte[] key = hashKey(password).getBytes();
+            byte[] dataBytes = data.getBytes();
+            byte[] encrypted = new byte[dataBytes.length];
+            
+            for (int i = 0; i < dataBytes.length; i++) {
+                encrypted[i] = (byte) (dataBytes[i] ^ key[i % key.length]);
+            }
+            
+            return Base64.getEncoder().encodeToString(encrypted);
+        } catch (Exception e) {
+            return data; // في حالة الفشل، إرجاع البيانات كما هي
+        }
+    }
+    
+    /**
+     * فك تشفير البيانات
+     */
+    private String decryptData(String encryptedData, String password) {
+        try {
+            byte[] key = hashKey(password).getBytes();
+            byte[] encrypted = Base64.getDecoder().decode(encryptedData);
+            byte[] decrypted = new byte[encrypted.length];
+            
+            for (int i = 0; i < encrypted.length; i++) {
+                decrypted[i] = (byte) (encrypted[i] ^ key[i % key.length]);
+            }
+            
+            return new String(decrypted);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    /**
+     * إنشاء hash للمفتاح
+     */
+    private String hashKey(String key) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(key.getBytes());
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            return hexString.toString().substring(0, 16); // أول 16 حرف
+        } catch (Exception e) {
+            return key.hashCode() + "";
+        }
+    }
+    
+    private void notifyWebView(String event, String data) {
+        if (webView != null) {
+            mainHandler.post(() -> {
+                String js = String.format(
+                    "if(window.ABXBridge && window.ABXBridge.onEvent) { window.ABXBridge.onEvent('%s', '%s'); }",
+                    event, data.replace("'", "\\'")
+                );
+                webView.evaluateJavascript(js, null);
+            });
+        }
+    }
+    
+    public void cleanup() {
+        sessionData.clear();
+    }
+}

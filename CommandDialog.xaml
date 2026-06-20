@@ -1,0 +1,122 @@
+<Window x:Class="TcpServerApp.CommandDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="إرسال أمر سريع" Height="400" Width="500"
+        Background="#0F0F0F" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" WindowStyle="None" AllowsTransparency="True">
+    
+    <Border Background="#0F0F0F" CornerRadius="12" BorderBrush="#0078D4" BorderThickness="2">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="30" ShadowDepth="0" Opacity="0.8"/>
+        </Border.Effect>
+        
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Grid Grid.Row="0" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="⚡ إرسال أمر سريع" Foreground="#00D4FF" 
+                               FontSize="20" FontWeight="Bold">
+                        <TextBlock.Effect>
+                            <DropShadowEffect Color="#00D4FF" BlurRadius="10" ShadowDepth="0" Opacity="0.6"/>
+                        </TextBlock.Effect>
+                    </TextBlock>
+                    <TextBlock x:Name="ClientNameText" Text="" 
+                               Foreground="#888" FontSize="12" Margin="0,5,0,0"/>
+                </StackPanel>
+                <Button Content="✕" Click="Close_Click" 
+                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Background="Transparent" Foreground="White" 
+                        BorderThickness="0" FontSize="18" Width="30" Height="30" 
+                        Cursor="Hand"/>
+            </Grid>
+
+            <!-- Commands -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="اختر أمراً من القائمة:" Foreground="White" 
+                               FontSize="13" Margin="0,0,0,10"/>
+                    
+                    <Border Background="#1A1A1A" CornerRadius="8" Padding="15" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="🔌 أوامر الاتصال" Foreground="#00D4FF" 
+                                       FontSize="12" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <Button Content="PING - اختبار الاتصال" Click="Command_Click" Tag="PING"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="STATUS - طلب الحالة" Click="Command_Click" Tag="STATUS"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="ECHO - اختبار الصدى" Click="Command_Click" Tag="ECHO"
+                                    Style="{StaticResource CommandButton}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#1A1A1A" CornerRadius="8" Padding="15" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="⚙️ أوامر التحكم" Foreground="#10B981" 
+                                       FontSize="12" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <Button Content="RESET - إعادة تعيين" Click="Command_Click" Tag="RESET"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="RESTART - إعادة تشغيل" Click="Command_Click" Tag="RESTART"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="SHUTDOWN - إيقاف" Click="Command_Click" Tag="SHUTDOWN"
+                                    Style="{StaticResource CommandButton}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#1A1A1A" CornerRadius="8" Padding="15">
+                        <StackPanel>
+                            <TextBlock Text="📊 أوامر البيانات" Foreground="#F59E0B" 
+                                       FontSize="12" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <Button Content="GET_INFO - طلب المعلومات" Click="Command_Click" Tag="GET_INFO"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="GET_DATA - طلب البيانات" Click="Command_Click" Tag="GET_DATA"
+                                    Style="{StaticResource CommandButton}"/>
+                            <Button Content="CLEAR - مسح البيانات" Click="Command_Click" Tag="CLEAR"
+                                    Style="{StaticResource CommandButton}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Custom Command -->
+            <Border Grid.Row="2" Background="#1A1A1A" CornerRadius="8" Padding="15" Margin="0,15,0,0">
+                <StackPanel>
+                    <TextBlock Text="✏️ أمر مخصص:" Foreground="White" FontSize="12" Margin="0,0,0,8"/>
+                    <TextBox x:Name="CustomCommandTextBox" Background="#0F0F0F" 
+                             Foreground="White" BorderBrush="#0078D4" BorderThickness="2"
+                             Padding="10" FontSize="13" FontFamily="Consolas"/>
+                    <Button Content="✅ إرسال الأمر المخصص" Click="SendCustom_Click"
+                            Margin="0,10,0,0" Padding="15,8" 
+                            Background="#0078D4" Foreground="White" 
+                            BorderThickness="0" Cursor="Hand" FontWeight="Bold"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+
+    <Window.Resources>
+        <Style x:Key="CommandButton" TargetType="Button">
+            <Setter Property="Background" Value="#0F0F0F"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#333"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#0078D4"/>
+                    <Setter Property="BorderBrush" Value="#00D4FF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+</Window>

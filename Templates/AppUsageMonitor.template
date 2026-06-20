@@ -1,0 +1,479 @@
+package {{PACKAGE}};
+
+import android.app.Activity;
+import android.app.AppOpsManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.provider.Settings;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.app.ActivityManager;
+import android.util.Log;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
+
+/**
+ * مراقب استخدام التطبيقات - ميزة احترافية لمراقبة وتتبع استخدام التطبيقات
+ * 
+ * الميزات:
+ * - الحصول على إحصائيات استخدام التطبيقات
+ * - مراقبة التطبيقات النشطة
+ * - طلب صلاحيات الوصول للإحصائيات
+ * - تصفية وترتيب البيانات
+ * - دعم فترات زمنية مخصصة
+ * 
+ * @author APK Professional Builder
+ * @version 1.0
+ */
+public class AppUsageMonitor {
+    private static final String TAG = "AppUsageMonitor";
+    private Activity activity;
+    private WebView webView;
+    private UsageStatsManager usageStatsManager;
+    private PackageManager packageManager;
+    private ActivityManager activityManager;
+    
+    // رموز الطلبات
+    private static final int REQUEST_USAGE_STATS_PERMISSION = 1001;
+    
+    public AppUsageMonitor(Activity activity) {
+        this.activity = activity;
+        this.packageManager = activity.getPackageManager();
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            this.usageStatsManager = (UsageStatsManager) activity.getSystemService(Context.USAGE_STATS_SERVICE);
+        }
+        
+        this.activityManager = (ActivityManager) activity.getSystemService(Context.ACTIVITY_SERVICE);
+    }
+    
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+    
+    /**
+     * فحص ما إذا كانت صلاحيات إحصائيات الاستخدام ممنوحة
+     */
+    @JavascriptInterface
+    public boolean hasUsageStatsPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return false;
+        }
+        
+        try {
+            AppOpsManager appOps = (AppOpsManager) activity.getSystemService(Context.APP_OPS_SERVICE);
+            int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(), activity.getPackageName());
+            return mode == AppOpsManager.MODE_ALLOWED;
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking usage stats permission", e);
+            return false;
+        }
+    }
+    
+    /**
+     * طلب صلاحيات الوصول لإحصائيات الاستخدام
+     */
+    @JavascriptInterface
+    public void requestUsageStatsPermission(final String callback) {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (hasUsageStatsPermission()) {
+                        executeCallback(callback, createSuccessResponse("الصلاحيات ممنوحة بالفعل"));
+                        return;
+                    }
+                    
+                    Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                    activity.startActivityForResult(intent, REQUEST_USAGE_STATS_PERMISSION);
+                    
+                    // فحص دوري للصلاحيات
+                    checkPermissionPeriodically(callback, 0);
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "Error requesting usage stats permission", e);
+                    executeCallback(callback, createErrorResponse("فشل في طلب الصلاحيات: " + e.getMessage()));
+                }
+            }
+        });
+    }
+    
+    /**
+     * فحص دوري للصلاحيات بعد فتح الإعدادات
+     */
+    private void checkPermissionPeriodically(final String callback, final int attempts) {
+        if (attempts > 30) { // 30 ثانية كحد أقصى
+            executeCallback(callback, createErrorResponse("انتهت مهلة انتظار منح الصلاحيات"));
+            return;
+        }
+        
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(1000); // انتظار ثانية واحدة
+                    
+                    if (hasUsageStatsPermission()) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                executeCallback(callback, createSuccessResponse("تم منح الصلاحيات بنجاح"));
+                            }
+                        });
+                    } else {
+                        checkPermissionPeriodically(callback, attempts + 1);
+                    }
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "Permission check interrupted", e);
+                }
+            }
+        }).start();
+    }
+    
+    /**
+     * الحصول على إحصائيات استخدام التطبيقات لفترة زمنية محددة
+     */
+    @JavascriptInterface
+    public void getUsageStats(long startTime, long endTime, final String callback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            executeCallback(callback, createErrorResponse("هذه الميزة تتطلب Android 5.0 أو أحدث"));
+            return;
+        }
+        
+        if (!hasUsageStatsPermission()) {
+            executeCallback(callback, createErrorResponse("صلاحيات إحصائيات الاستخدام غير ممنوحة"));
+            return;
+        }
+        
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<UsageStats> usageStatsList = usageStatsManager.queryUsageStats(
+                            UsageStatsManager.INTERVAL_DAILY, startTime, endTime);
+                    
+                    JSONArray appsArray = new JSONArray();
+                    
+                    for (UsageStats usageStats : usageStatsList) {
+                        if (usageStats.getTotalTimeInForeground() > 0) {
+                            JSONObject appObject = new JSONObject();
+                            
+                            String packageName = usageStats.getPackageName();
+                            String appName = getAppName(packageName);
+                            
+                            appObject.put("packageName", packageName);
+                            appObject.put("appName", appName);
+                            appObject.put("totalTimeInForeground", usageStats.getTotalTimeInForeground());
+                            appObject.put("lastTimeUsed", usageStats.getLastTimeUsed());
+                            appObject.put("firstTimeStamp", usageStats.getFirstTimeStamp());
+                            appObject.put("lastTimeStamp", usageStats.getLastTimeStamp());
+                            
+                            appsArray.put(appObject);
+                        }
+                    }
+                    
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            executeCallback(callback, createSuccessResponse("تم تحميل الإحصائيات بنجاح", appsArray));
+                        }
+                    });
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "Error getting usage stats", e);
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            executeCallback(callback, createErrorResponse("فشل في تحميل الإحصائيات: " + e.getMessage()));
+                        }
+                    });
+                }
+            }
+        });
+    }
+    
+    /**
+     * الحصول على إحصائيات اليوم الحالي
+     */
+    @JavascriptInterface
+    public void getTodayUsageStats(final String callback) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        
+        long startTime = calendar.getTimeInMillis();
+        long endTime = System.currentTimeMillis();
+        
+        getUsageStats(startTime, endTime, callback);
+    }
+    
+    /**
+     * الحصول على إحصائيات الأسبوع الحالي
+     */
+    @JavascriptInterface
+    public void getWeeklyUsageStats(final String callback) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.DAY_OF_WEEK, calendar.getFirstDayOfWeek());
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        
+        long startTime = calendar.getTimeInMillis();
+        long endTime = System.currentTimeMillis();
+        
+        getUsageStats(startTime, endTime, callback);
+    }
+    
+    /**
+     * الحصول على التطبيقات النشطة حالياً
+     */
+    @JavascriptInterface
+    public void getRunningApps(final String callback) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONArray appsArray = new JSONArray();
+                    
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        List<ActivityManager.RunningAppProcessInfo> runningApps = 
+                                activityManager.getRunningAppProcesses();
+                        
+                        if (runningApps != null) {
+                            for (ActivityManager.RunningAppProcessInfo processInfo : runningApps) {
+                                if (processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                                    for (String packageName : processInfo.pkgList) {
+                                        JSONObject appObject = new JSONObject();
+                                        
+                                        String appName = getAppName(packageName);
+                                        
+                                        appObject.put("packageName", packageName);
+                                        appObject.put("appName", appName);
+                                        appObject.put("processName", processInfo.processName);
+                                        appObject.put("importance", getImportanceString(processInfo.importance));
+                                        appObject.put("pid", processInfo.pid);
+                                        
+                                        appsArray.put(appObject);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            executeCallback(callback, createSuccessResponse("تم تحميل التطبيقات النشطة", appsArray));
+                        }
+                    });
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "Error getting running apps", e);
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            executeCallback(callback, createErrorResponse("فشل في تحميل التطبيقات النشطة: " + e.getMessage()));
+                        }
+                    });
+                }
+            }
+        });
+    }
+    
+    /**
+     * الحصول على أكثر التطبيقات استخداماً
+     */
+    @JavascriptInterface
+    public void getMostUsedApps(final int limit, final String callback) {
+        getTodayUsageStats(new String() {
+            @Override
+            public String toString() {
+                return "function(result) { " +
+                       "if (result.success && result.data) { " +
+                       "  var sortedApps = result.data.sort(function(a, b) { " +
+                       "    return b.totalTimeInForeground - a.totalTimeInForeground; " +
+                       "  }).slice(0, " + limit + "); " +
+                       "  " + callback + "({success: true, data: sortedApps, message: 'تم تحميل أكثر التطبيقات استخداماً'}); " +
+                       "} else { " +
+                       "  " + callback + "(result); " +
+                       "} }";
+            }
+        });
+    }
+    
+    /**
+     * فحص ما إذا كان تطبيق معين نشط
+     */
+    @JavascriptInterface
+    public void isAppRunning(final String packageName, final String callback) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean isRunning = false;
+                    
+                    List<ActivityManager.RunningAppProcessInfo> runningApps = 
+                            activityManager.getRunningAppProcesses();
+                    
+                    if (runningApps != null) {
+                        for (ActivityManager.RunningAppProcessInfo processInfo : runningApps) {
+                            for (String pkg : processInfo.pkgList) {
+                                if (pkg.equals(packageName)) {
+                                    isRunning = true;
+                                    break;
+                                }
+                            }
+                            if (isRunning) break;
+                        }
+                    }
+                    
+                    final boolean finalIsRunning = isRunning;
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            JSONObject result = new JSONObject();
+                            try {
+                                result.put("success", true);
+                                result.put("isRunning", finalIsRunning);
+                                result.put("packageName", packageName);
+                                result.put("message", finalIsRunning ? "التطبيق نشط" : "التطبيق غير نشط");
+                                executeCallback(callback, result.toString());
+                            } catch (Exception e) {
+                                executeCallback(callback, createErrorResponse("خطأ في فحص حالة التطبيق"));
+                            }
+                        }
+                    });
+                    
+                } catch (Exception e) {
+                    Log.e(TAG, "Error checking if app is running", e);
+                    activity.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            executeCallback(callback, createErrorResponse("فشل في فحص حالة التطبيق: " + e.getMessage()));
+                        }
+                    });
+                }
+            }
+        });
+    }
+    
+    /**
+     * الحصول على اسم التطبيق من اسم الحزمة
+     */
+    private String getAppName(String packageName) {
+        try {
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+            return packageManager.getApplicationLabel(appInfo).toString();
+        } catch (PackageManager.NameNotFoundException e) {
+            return packageName; // إرجاع اسم الحزمة إذا لم يتم العثور على التطبيق
+        }
+    }
+    
+    /**
+     * تحويل رقم الأهمية إلى نص
+     */
+    private String getImportanceString(int importance) {
+        switch (importance) {
+            case ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND:
+                return "المقدمة";
+            case ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE:
+                return "مرئي";
+            case ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE:
+                return "خدمة";
+            case ActivityManager.RunningAppProcessInfo.IMPORTANCE_BACKGROUND:
+                return "الخلفية";
+            case ActivityManager.RunningAppProcessInfo.IMPORTANCE_EMPTY:
+                return "فارغ";
+            default:
+                return "غير محدد";
+        }
+    }
+    
+    /**
+     * إنشاء استجابة نجاح
+     */
+    private String createSuccessResponse(String message) {
+        try {
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("message", message);
+            return response.toString();
+        } catch (Exception e) {
+            return "{\"success\":true,\"message\":\"" + message + "\"}";
+        }
+    }
+    
+    /**
+     * إنشاء استجابة نجاح مع بيانات
+     */
+    private String createSuccessResponse(String message, JSONArray data) {
+        try {
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("message", message);
+            response.put("data", data);
+            return response.toString();
+        } catch (Exception e) {
+            return "{\"success\":true,\"message\":\"" + message + "\",\"data\":[]}";
+        }
+    }
+    
+    /**
+     * إنشاء استجابة خطأ
+     */
+    private String createErrorResponse(String message) {
+        try {
+            JSONObject response = new JSONObject();
+            response.put("success", false);
+            response.put("message", message);
+            return response.toString();
+        } catch (Exception e) {
+            return "{\"success\":false,\"message\":\"" + message + "\"}";
+        }
+    }
+    
+    /**
+     * تنفيذ callback في JavaScript
+     */
+    private void executeCallback(String callback, String result) {
+        if (webView != null && callback != null && !callback.isEmpty()) {
+            String script = "javascript:(" + callback + ")(" + result + ");";
+            webView.evaluateJavascript(script, null);
+        }
+    }
+    
+    /**
+     * معالجة نتائج الأنشطة
+     */
+    public void handleActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_USAGE_STATS_PERMISSION) {
+            // سيتم التحقق من الصلاحيات في checkPermissionPeriodically
+            Log.d(TAG, "Returned from usage stats settings");
+        }
+    }
+    
+    /**
+     * تنظيف الموارد
+     */
+    public void cleanup() {
+        this.activity = null;
+        this.webView = null;
+        this.usageStatsManager = null;
+        this.packageManager = null;
+        this.activityManager = null;
+    }
+}

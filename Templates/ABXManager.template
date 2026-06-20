@@ -1,0 +1,823 @@
+package {{PACKAGE}};
+
+import android.app.Service;
+import android.content.Intent;
+import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
+import android.webkit.WebView;
+import android.webkit.JavascriptInterface;
+import android.content.Context;
+import android.app.NotificationManager;
+import android.app.NotificationChannel;
+import android.app.Notification;
+import android.os.Build;
+import androidx.core.app.NotificationCompat;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Advanced Background Extensions Manager
+ * يوفر إمكانيات متقدمة لإدارة العمليات في الخلفية
+ */
+public class ABXManager {
+    private Context context;
+    private WebView webView;
+    private ExecutorService executor;
+    private Timer backgroundTimer;
+    private Handler mainHandler;
+    private NotificationManager notificationManager;
+    private static final String CHANNEL_ID = "ABX_CHANNEL";
+    private static final int NOTIFICATION_ID = 1001;
+    
+    public ABXManager(Context context) {
+        this.context = context;
+        this.executor = Executors.newFixedThreadPool(3);
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.backgroundTimer = new Timer("ABX-Timer", true);
+        setupNotificationChannel();
+    }
+    
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+    
+    private void setupNotificationChannel() {
+        notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID,
+                "ABX Background Service",
+                NotificationManager.IMPORTANCE_LOW
+            );
+            channel.setDescription("Advanced Background Extensions");
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+    
+    /**
+     * بدء مراقبة التطبيق في الخلفية
+     */
+    @JavascriptInterface
+    public void startBackgroundMonitoring(String config) {
+        executor.execute(() -> {
+            try {
+                // تحليل إعدادات المراقبة
+                int interval = parseInterval(config);
+                
+                backgroundTimer.scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        performBackgroundTasks();
+                    }
+                }, 0, interval * 1000);
+                
+                showPersistentNotification("ABX Active", "Background monitoring enabled");
+                notifyWebView("abx_monitoring_started", "true");
+                
+            } catch (Exception e) {
+                notifyWebView("abx_error", e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * إيقاف مراقبة الخلفية
+     */
+    @JavascriptInterface
+    public void stopBackgroundMonitoring() {
+        if (backgroundTimer != null) {
+            backgroundTimer.cancel();
+            backgroundTimer = new Timer("ABX-Timer", true);
+        }
+        notificationManager.cancel(NOTIFICATION_ID);
+        notifyWebView("abx_monitoring_stopped", "true");
+    }
+    
+    /**
+     * تنفيذ مهمة مخصصة في الخلفية
+     */
+    @JavascriptInterface
+    public void executeBackgroundTask(String taskName, String parameters) {
+        executor.execute(() -> {
+            try {
+                String result = processBackgroundTask(taskName, parameters);
+                notifyWebView("abx_task_completed", result);
+            } catch (Exception e) {
+                notifyWebView("abx_task_error", e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * الحصول على حالة النظام
+     */
+    @JavascriptInterface
+    public void getSystemStatus() {
+        executor.execute(() -> {
+            try {
+                String status = collectSystemInfo();
+                notifyWebView("abx_system_status", status);
+            } catch (Exception e) {
+                notifyWebView("abx_error", e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * جدولة مهمة دورية
+     */
+    @JavascriptInterface
+    public void schedulePeriodicTask(String taskId, int intervalSeconds, String action) {
+        backgroundTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    String result = executeScheduledAction(action);
+                    notifyWebView("abx_scheduled_task", "{\"taskId\":\"" + taskId + "\",\"result\":\"" + result + "\"}");
+                } catch (Exception e) {
+                    notifyWebView("abx_scheduled_error", "{\"taskId\":\"" + taskId + "\",\"error\":\"" + e.getMessage() + "\"}");
+                }
+            }
+        }, 0, intervalSeconds * 1000);
+    }
+    
+    private void performBackgroundTasks() {
+        // فحص حالة الاتصال
+        boolean isConnected = checkNetworkConnectivity();
+        
+        // فحص استخدام الذاكرة
+        long memoryUsage = getMemoryUsage();
+        
+        // فحص حالة البطارية
+        int batteryLevel = getBatteryLevel();
+        
+        // إرسال البيانات للـ WebView
+        String statusData = String.format(
+            "{\"network\":%b,\"memory\":%d,\"battery\":%d,\"timestamp\":%d}",
+            isConnected, memoryUsage, batteryLevel, System.currentTimeMillis()
+        );
+        
+        notifyWebView("abx_background_update", statusData);
+    }
+    
+    private String processBackgroundTask(String taskName, String parameters) {
+        switch (taskName) {
+            case "data_sync":
+                return performDataSync(parameters);
+            case "cache_cleanup":
+                return performCacheCleanup();
+            case "health_check":
+                return performHealthCheck();
+            case "custom_action":
+                return executeCustomAction(parameters);
+            default:
+                return "Unknown task: " + taskName;
+        }
+    }
+    
+    private String performDataSync(String parameters) {
+        // محاكاة مزامنة البيانات
+        try {
+            Thread.sleep(2000); // محاكاة عملية
+            return "Data sync completed successfully";
+        } catch (InterruptedException e) {
+            return "Data sync interrupted";
+        }
+    }
+    
+    private String performCacheCleanup() {
+        // تنظيف الذاكرة المؤقتة
+        try {
+            Runtime.getRuntime().gc();
+            return "Cache cleanup completed";
+        } catch (Exception e) {
+            return "Cache cleanup failed: " + e.getMessage();
+        }
+    }
+    
+    private String performHealthCheck() {
+        // فحص صحة التطبيق
+        long freeMemory = Runtime.getRuntime().freeMemory();
+        long totalMemory = Runtime.getRuntime().totalMemory();
+        double memoryUsagePercent = ((double)(totalMemory - freeMemory) / totalMemory) * 100;
+        
+        return String.format("Health OK - Memory usage: %.1f%%", memoryUsagePercent);
+    }
+    
+    private String executeCustomAction(String parameters) {
+        // تنفيذ إجراء مخصص
+        return "Custom action executed with parameters: " + parameters;
+    }
+    
+    private String executeScheduledAction(String action) {
+        // تنفيذ الإجراءات المجدولة
+        switch (action) {
+            case "ping":
+                return "pong";
+            case "status":
+                return "active";
+            case "cleanup":
+                performCacheCleanup();
+                return "cleaned";
+            default:
+                return "executed: " + action;
+        }
+    }
+    
+    private boolean checkNetworkConnectivity() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) 
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+            return activeNetwork != null && activeNetwork.isConnectedOrConnecting();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    private long getMemoryUsage() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.totalMemory() - runtime.freeMemory();
+    }
+    
+    private int getBatteryLevel() {
+        try {
+            android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            Intent batteryStatus = context.registerReceiver(null, ifilter);
+            int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+            int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+            return (int) ((level / (float) scale) * 100);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+    
+    private String collectSystemInfo() {
+        return String.format(
+            "{\"device\":\"%s\",\"android\":\"%s\",\"memory\":%d,\"battery\":%d}",
+            Build.MODEL,
+            Build.VERSION.RELEASE,
+            getMemoryUsage(),
+            getBatteryLevel()
+        );
+    }
+    
+    private int parseInterval(String config) {
+        try {
+            return Integer.parseInt(config);
+        } catch (NumberFormatException e) {
+            return 30; // افتراضي 30 ثانية
+        }
+    }
+    
+    private void showPersistentNotification(String title, String content) {
+        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build();
+            
+        notificationManager.notify(NOTIFICATION_ID, notification);
+    }
+    
+    private void notifyWebView(String event, String data) {
+        if (webView != null) {
+            mainHandler.post(() -> {
+                String js = String.format(
+                    "if(window.ABX && window.ABX.onEvent) { window.ABX.onEvent('%s', '%s'); }",
+                    event, data.replace("'", "\\'")
+                );
+                webView.evaluateJavascript(js, null);
+            });
+        }
+    }
+    
+    public void cleanup() {
+        if (backgroundTimer != null) {
+            backgroundTimer.cancel();
+        }
+        if (executor != null) {
+            executor.shutdown();
+        }
+        if (notificationManager != null) {
+            notificationManager.cancel(NOTIFICATION_ID);
+        }
+    }
+}
+    
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //                              الميزات المتقدمة الإضافية
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * مراقبة أداء التطبيق المتقدمة
+     */
+    @JavascriptInterface
+    public void startPerformanceMonitoring(String config) {
+        executor.execute(() -> {
+            try {
+                Timer performanceTimer = new Timer("ABX-Performance", true);
+                performanceTimer.scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        collectPerformanceMetrics();
+                    }
+                }, 0, 5000); // كل 5 ثواني
+                
+                notifyWebView("abx_performance_monitoring_started", "true");
+            } catch (Exception e) {
+                notifyWebView("abx_error", "Performance monitoring failed: " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * جمع مقاييس الأداء المفصلة
+     */
+    private void collectPerformanceMetrics() {
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            
+            // معلومات الذاكرة المفصلة
+            long totalMemory = runtime.totalMemory();
+            long freeMemory = runtime.freeMemory();
+            long usedMemory = totalMemory - freeMemory;
+            long maxMemory = runtime.maxMemory();
+            
+            // حساب النسب المئوية
+            double memoryUsagePercent = (usedMemory * 100.0) / totalMemory;
+            double maxMemoryUsagePercent = (usedMemory * 100.0) / maxMemory;
+            
+            // معلومات المعالج (تقريبية)
+            long startTime = System.nanoTime();
+            for (int i = 0; i < 1000; i++) {
+                Math.sqrt(i);
+            }
+            long endTime = System.nanoTime();
+            long cpuTestTime = endTime - startTime;
+            
+            // إنشاء تقرير الأداء
+            String performanceData = String.format(
+                "{\"timestamp\":%d,\"memory\":{\"total\":%d,\"used\":%d,\"free\":%d,\"max\":%d,\"usage_percent\":%.2f,\"max_usage_percent\":%.2f},\"cpu_test_time\":%d,\"available_processors\":%d}",
+                System.currentTimeMillis(),
+                totalMemory,
+                usedMemory,
+                freeMemory,
+                maxMemory,
+                memoryUsagePercent,
+                maxMemoryUsagePercent,
+                cpuTestTime,
+                runtime.availableProcessors()
+            );
+            
+            notifyWebView("abx_performance_update", performanceData);
+            
+            // تحذير إذا كان الاستخدام عالي
+            if (memoryUsagePercent > 85) {
+                notifyWebView("abx_performance_warning", "High memory usage detected: " + String.format("%.1f%%", memoryUsagePercent));
+            }
+            
+        } catch (Exception e) {
+            notifyWebView("abx_error", "Performance metrics collection failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * مراقبة حالة البطارية المتقدمة
+     */
+    @JavascriptInterface
+    public void startBatteryMonitoring() {
+        executor.execute(() -> {
+            try {
+                Timer batteryTimer = new Timer("ABX-Battery", true);
+                batteryTimer.scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        monitorBatteryStatus();
+                    }
+                }, 0, 30000); // كل 30 ثانية
+                
+                notifyWebView("abx_battery_monitoring_started", "true");
+            } catch (Exception e) {
+                notifyWebView("abx_error", "Battery monitoring failed: " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * مراقبة حالة البطارية
+     */
+    private void monitorBatteryStatus() {
+        try {
+            android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            Intent batteryStatus = context.registerReceiver(null, ifilter);
+            
+            if (batteryStatus != null) {
+                int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+                int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+                int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+                int plugged = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, -1);
+                int temperature = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1);
+                int voltage = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1);
+                
+                boolean isCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                                   status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+                
+                int batteryPct = (int) ((level / (float) scale) * 100);
+                
+                String batteryData = String.format(
+                    "{\"timestamp\":%d,\"level\":%d,\"charging\":%b,\"plugged\":%b,\"temperature\":%.1f,\"voltage\":%d,\"status\":\"%s\"}",
+                    System.currentTimeMillis(),
+                    batteryPct,
+                    isCharging,
+                    plugged != 0,
+                    temperature / 10.0,
+                    voltage,
+                    getBatteryStatusString(status)
+                );
+                
+                notifyWebView("abx_battery_update", batteryData);
+                
+                // تحذيرات البطارية
+                if (batteryPct <= 15 && !isCharging) {
+                    notifyWebView("abx_battery_warning", "Low battery: " + batteryPct + "%");
+                }
+                
+                if (temperature > 400) { // 40 درجة مئوية
+                    notifyWebView("abx_battery_warning", "High battery temperature: " + (temperature / 10.0) + "°C");
+                }
+            }
+        } catch (Exception e) {
+            notifyWebView("abx_error", "Battery monitoring error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * الحصول على نص حالة البطارية
+     */
+    private String getBatteryStatusString(int status) {
+        switch (status) {
+            case android.os.BatteryManager.BATTERY_STATUS_CHARGING:
+                return "Charging";
+            case android.os.BatteryManager.BATTERY_STATUS_DISCHARGING:
+                return "Discharging";
+            case android.os.BatteryManager.BATTERY_STATUS_FULL:
+                return "Full";
+            case android.os.BatteryManager.BATTERY_STATUS_NOT_CHARGING:
+                return "Not Charging";
+            case android.os.BatteryManager.BATTERY_STATUS_UNKNOWN:
+            default:
+                return "Unknown";
+        }
+    }
+    
+    /**
+     * مراقبة استخدام الشبكة المتقدمة
+     */
+    @JavascriptInterface
+    public void startNetworkMonitoring() {
+        executor.execute(() -> {
+            try {
+                Timer networkTimer = new Timer("ABX-Network", true);
+                networkTimer.scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        monitorNetworkStatus();
+                    }
+                }, 0, 10000); // كل 10 ثواني
+                
+                notifyWebView("abx_network_monitoring_started", "true");
+            } catch (Exception e) {
+                notifyWebView("abx_error", "Network monitoring failed: " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * مراقبة حالة الشبكة
+     */
+    private void monitorNetworkStatus() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) 
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+            
+            String networkData;
+            if (activeNetwork != null && activeNetwork.isConnected()) {
+                networkData = String.format(
+                    "{\"timestamp\":%d,\"connected\":true,\"type\": \"%s\",\"subtype\":\"%s\",\"roaming\":%b,\"available\":%b,\"reason\":\"%s\"}",
+                    System.currentTimeMillis(),
+                    activeNetwork.getTypeName(),
+                    activeNetwork.getSubtypeName(),
+                    activeNetwork.isRoaming(),
+                    activeNetwork.isAvailable(),
+                    activeNetwork.getReason() != null ? activeNetwork.getReason() : "N/A"
+                );
+            } else {
+                networkData = String.format(
+                    "{\"timestamp\":%d,\"connected\":false,\"reason\":\"%s\"}",
+                    System.currentTimeMillis(),
+                    activeNetwork != null && activeNetwork.getReason() != null ? activeNetwork.getReason() : "No connection"
+                );
+            }
+            
+            notifyWebView("abx_network_update", networkData);
+            
+        } catch (Exception e) {
+            notifyWebView("abx_error", "Network monitoring error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * تنفيذ اختبار سرعة الشبكة البسيط
+     */
+    @JavascriptInterface
+    public void performNetworkSpeedTest() {
+        executor.execute(() -> {
+            try {
+                long startTime = System.currentTimeMillis();
+                
+                // محاكاة اختبار سرعة بسيط
+                java.net.URL url = new java.net.URL("https://www.google.com");
+                java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(5000);
+                connection.connect();
+                
+                int responseCode = connection.getResponseCode();
+                long endTime = System.currentTimeMillis();
+                long latency = endTime - startTime;
+                
+                connection.disconnect();
+                
+                String speedTestResult = String.format(
+                    "{\"timestamp\":%d,\"latency\":%d,\"response_code\":%d,\"success\":%b}",
+                    System.currentTimeMillis(),
+                    latency,
+                    responseCode,
+                    responseCode == 200
+                );
+                
+                notifyWebView("abx_speed_test_result", speedTestResult);
+                
+            } catch (Exception e) {
+                String errorResult = String.format(
+                    "{\"timestamp\":%d,\"success\":false,\"error\":\"%s\"}",
+                    System.currentTimeMillis(),
+                    e.getMessage()
+                );
+                notifyWebView("abx_speed_test_result", errorResult);
+            }
+        });
+    }
+    
+    /**
+     * إدارة التخزين المتقدمة
+     */
+    @JavascriptInterface
+    public void getStorageInfo() {
+        executor.execute(() -> {
+            try {
+                // معلومات التخزين الداخلي
+                java.io.File internalDir = context.getFilesDir();
+                long internalTotal = internalDir.getTotalSpace();
+                long internalFree = internalDir.getFreeSpace();
+                long internalUsed = internalTotal - internalFree;
+                
+                // معلومات التخزين الخارجي
+                java.io.File externalDir = android.os.Environment.getExternalStorageDirectory();
+                long externalTotal = externalDir.getTotalSpace();
+                long externalFree = externalDir.getFreeSpace();
+                long externalUsed = externalTotal - externalFree;
+                
+                // معلومات الكاش
+                java.io.File cacheDir = context.getCacheDir();
+                long cacheSize = calculateDirectorySize(cacheDir);
+                
+                String storageData = String.format(
+                    "{\"timestamp\":%d,\"internal\":{\"total\":%d,\"used\":%d,\"free\":%d,\"usage_percent\":%.2f},\"external\":{\"total\":%d,\"used\":%d,\"free\":%d,\"usage_percent\":%.2f},\"cache_size\":%d}",
+                    System.currentTimeMillis(),
+                    internalTotal, internalUsed, internalFree, (internalUsed * 100.0) / internalTotal,
+                    externalTotal, externalUsed, externalFree, (externalUsed * 100.0) / externalTotal,
+                    cacheSize
+                );
+                
+                notifyWebView("abx_storage_info", storageData);
+                
+            } catch (Exception e) {
+                notifyWebView("abx_error", "Storage info error: " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * حساب حجم المجلد
+     */
+    private long calculateDirectorySize(java.io.File directory) {
+        long size = 0;
+        try {
+            if (directory.exists()) {
+                java.io.File[] files = directory.listFiles();
+                if (files != null) {
+                    for (java.io.File file : files) {
+                        if (file.isDirectory()) {
+                            size += calculateDirectorySize(file);
+                        } else {
+                            size += file.length();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // تجاهل الأخطاء
+        }
+        return size;
+    }
+    
+    /**
+     * تنظيف الكاش المتقدم
+     */
+    @JavascriptInterface
+    public void performAdvancedCacheCleanup() {
+        executor.execute(() -> {
+            try {
+                long beforeSize = calculateDirectorySize(context.getCacheDir());
+                
+                // تنظيف كاش التطبيق
+                deleteDirectory(context.getCacheDir());
+                
+                // تنظيف الذاكرة
+                System.gc();
+                
+                // إعادة إنشاء مجلد الكاش
+                context.getCacheDir().mkdirs();
+                
+                long afterSize = calculateDirectorySize(context.getCacheDir());
+                long freedSpace = beforeSize - afterSize;
+                
+                String cleanupResult = String.format(
+                    "{\"timestamp\":%d,\"freed_bytes\":%d,\"before_size\":%d,\"after_size\":%d,\"success\":true}",
+                    System.currentTimeMillis(),
+                    freedSpace,
+                    beforeSize,
+                    afterSize
+                );
+                
+                notifyWebView("abx_cleanup_result", cleanupResult);
+                
+            } catch (Exception e) {
+                String errorResult = String.format(
+                    "{\"timestamp\":%d,\"success\":false,\"error\":\"%s\"}",
+                    System.currentTimeMillis(),
+                    e.getMessage()
+                );
+                notifyWebView("abx_cleanup_result", errorResult);
+            }
+        });
+    }
+    
+    /**
+     * حذف مجلد وجميع محتوياته
+     */
+    private boolean deleteDirectory(java.io.File directory) {
+        if (directory.exists()) {
+            java.io.File[] files = directory.listFiles();
+            if (files != null) {
+                for (java.io.File file : files) {
+                    if (file.isDirectory()) {
+                        deleteDirectory(file);
+                    } else {
+                        file.delete();
+                    }
+                }
+            }
+        }
+        return directory.delete();
+    }
+    
+    /**
+     * إنشاء تقرير شامل عن النظام
+     */
+    @JavascriptInterface
+    public void generateSystemReport() {
+        executor.execute(() -> {
+            try {
+                // جمع جميع المعلومات
+                Runtime runtime = Runtime.getRuntime();
+                
+                // معلومات الجهاز
+                String deviceInfo = String.format(
+                    "\"device\":{\"model\":\"%s\",\"manufacturer\":\"%s\",\"android_version\":\"%s\",\"api_level\":%d,\"board\":\"%s\",\"hardware\":\"%s\"}",
+                    Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE, Build.VERSION.SDK_INT, Build.BOARD, Build.HARDWARE
+                );
+                
+                // معلومات الذاكرة
+                String memoryInfo = String.format(
+                    "\"memory\":{\"total\":%d,\"used\":%d,\"free\":%d,\"max\":%d,\"processors\":%d}",
+                    runtime.totalMemory(),
+                    runtime.totalMemory() - runtime.freeMemory(),
+                    runtime.freeMemory(),
+                    runtime.maxMemory(),
+                    runtime.availableProcessors()
+                );
+                
+                // معلومات البطارية
+                int batteryLevel = getBatteryLevel();
+                String batteryInfo = String.format(
+                    "\"battery\":{\"level\":%d,\"timestamp\":%d}",
+                    batteryLevel,
+                    System.currentTimeMillis()
+                );
+                
+                // معلومات الشبكة
+                boolean networkConnected = checkNetworkConnectivity();
+                String networkInfo = String.format(
+                    "\"network\":{\"connected\":%b,\"timestamp\":%d}",
+                    networkConnected,
+                    System.currentTimeMillis()
+                );
+                
+                // تجميع التقرير
+                String systemReport = String.format(
+                    "{\"timestamp\":%d,\"report_version\":\"1.0\",%s,%s,%s,%s}",
+                    System.currentTimeMillis(),
+                    deviceInfo,
+                    memoryInfo,
+                    batteryInfo,
+                    networkInfo
+                );
+                
+                notifyWebView("abx_system_report", systemReport);
+                
+            } catch (Exception e) {
+                notifyWebView("abx_error", "System report generation failed: " + e.getMessage());
+            }
+        });
+    }
+    
+    /**
+     * تصدير السجلات
+     */
+    @JavascriptInterface
+    public void exportLogs(String format) {
+        executor.execute(() -> {
+            try {
+                String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.getDefault()).format(new java.util.Date());
+                String fileName = "abx_logs_" + timestamp + "." + format.toLowerCase();
+                
+                java.io.File logsDir = new java.io.File(context.getExternalFilesDir(null), "ABX_Logs");
+                if (!logsDir.exists()) {
+                    logsDir.mkdirs();
+                }
+                
+                java.io.File logFile = new java.io.File(logsDir, fileName);
+                java.io.FileWriter writer = new java.io.FileWriter(logFile);
+                
+                if ("json".equals(format.toLowerCase())) {
+                    // تصدير بصيغة JSON
+                    String jsonLogs = String.format(
+                        "{\"export_time\":\"%s\",\"app_uptime\":%d,\"device\":\"%s\",\"android\":\"%s\",\"memory_usage\":%d,\"battery_level\":%d}",
+                        timestamp,
+                        System.currentTimeMillis(),
+                        Build.MODEL,
+                        Build.VERSION.RELEASE,
+                        getMemoryUsage(),
+                        getBatteryLevel()
+                    );
+                    writer.write(jsonLogs);
+                } else {
+                    // تصدير بصيغة نصية
+                    writer.write("ABX System Logs Export\n");
+                    writer.write("======================\n");
+                    writer.write("Export Time: " + timestamp + "\n");
+                    writer.write("Device: " + Build.MODEL + "\n");
+                    writer.write("Android: " + Build.VERSION.RELEASE + "\n");
+                    writer.write("Memory Usage: " + getMemoryUsage() + " bytes\n");
+                    writer.write("Battery Level: " + getBatteryLevel() + "%\n");
+                }
+                
+                writer.close();
+                
+                String exportResult = String.format(
+                    "{\"success\":true,\"file_path\":\"%s\",\"file_size\":%d,\"format\":\"%s\"}",
+                    logFile.getAbsolutePath(),
+                    logFile.length(),
+                    format
+                );
+                
+                notifyWebView("abx_logs_exported", exportResult);
+                
+            } catch (Exception e) {
+                String errorResult = String.format(
+                    "{\"success\":false,\"error\":\"%s\"}",
+                    e.getMessage()
+                );
+                notifyWebView("abx_logs_exported", errorResult);
+            }
+        });
+    }

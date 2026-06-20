@@ -1,0 +1,738 @@
+<Window x:Class="TcpServerApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TcpServerApp"
+        Title="خادم TCP المتقدم" Height="860" Width="1560"
+        Background="#0A0A0F" WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanResize">
+
+    <Window.Resources>
+
+        <!-- ═══ SHARED COLORS ═══ -->
+        <SolidColorBrush x:Key="AccentBlue"    Color="#2979FF"/>
+        <SolidColorBrush x:Key="AccentCyan"    Color="#00E5FF"/>
+        <SolidColorBrush x:Key="AccentGreen"   Color="#00E676"/>
+        <SolidColorBrush x:Key="AccentOrange"  Color="#FF9100"/>
+        <SolidColorBrush x:Key="AccentPurple"  Color="#AA00FF"/>
+        <SolidColorBrush x:Key="AccentRed"     Color="#FF1744"/>
+        <SolidColorBrush x:Key="Surface1"      Color="#12121A"/>
+        <SolidColorBrush x:Key="Surface2"      Color="#1A1A28"/>
+        <SolidColorBrush x:Key="Surface3"      Color="#22223A"/>
+        <SolidColorBrush x:Key="TextPrimary"   Color="#F0F0FF"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#8888AA"/>
+
+        <!-- ═══ MODERN BUTTON ═══ -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="18,10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="RenderTransform">
+                                    <Setter.Value><ScaleTransform ScaleX="0.96" ScaleY="0.96"/></Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ ICON BUTTON (TitleBar) ═══ -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#CCCCEE"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="38"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="Transparent" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#20FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#35FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ CLOSE BUTTON ═══ -->
+        <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Foreground" Value="#FF6B6B"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#40FF1744"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ═══ MODERN TEXTBOX ═══ -->
+        <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="#1A1A28"/>
+            <Setter Property="Foreground" Value="#F0F0FF"/>
+            <Setter Property="BorderBrush" Value="#2979FF"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="CaretBrush" Value="#2979FF"/>
+            <Setter Property="SelectionBrush" Value="#402979FF"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="#00E5FF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ═══ CARD BORDER ═══ -->
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#12121A"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#25253A"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="#000000" BlurRadius="24" ShadowDepth="4" Opacity="0.5"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ STAT MINI-CARD ═══ -->
+        <Style x:Key="StatCard" TargetType="Border">
+            <Setter Property="Background" Value="#1A1A28"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#2A2A3F"/>
+        </Style>
+
+        <!-- ═══ TAB CONTROL ═══ -->
+        <Style x:Key="ModernTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <Style x:Key="ModernTabItem" TargetType="TabItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="bd" Background="Transparent"
+                                CornerRadius="9,9,0,0"
+                                Padding="18,9" Margin="0,0,4,0"
+                                BorderThickness="0,0,0,2.5"
+                                BorderBrush="Transparent">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1C1C2E"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#2979FF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#16162A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ LOG ACTION BUTTON ═══ -->
+        <Style x:Key="LogActionBtn" TargetType="Button">
+            <Setter Property="Foreground" Value="#CCCCEE"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="#1A1A28"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#22223A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </Window.Resources>
+
+    <!-- Root -->
+    <Border Background="#0A0A0F" CornerRadius="14">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="40" ShadowDepth="0" Opacity="0.9"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="54"/>   <!-- TitleBar -->
+                <RowDefinition Height="Auto"/> <!-- Control Panel -->
+                <RowDefinition Height="*"/>    <!-- Main Content -->
+                <RowDefinition Height="Auto"/> <!-- Notifications -->
+            </Grid.RowDefinitions>
+
+            <!-- ═══════════════════════════════════════════
+                 ROW 0 ─ TITLE BAR
+                 ═══════════════════════════════════════════ -->
+            <Border Grid.Row="0" CornerRadius="14,14,0,0"
+                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#0D1B4B" Offset="0"/>
+                        <GradientStop Color="#0A1235" Offset="0.5"/>
+                        <GradientStop Color="#060C22" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+
+                <Grid Margin="16,0,8,0">
+                    <!-- LEFT: Logo + Title -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Logo -->
+                        <Grid Width="34" Height="34" Margin="0,0,10,0">
+                            <Ellipse Width="34" Height="34">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush>
+                                        <GradientStop Color="#2979FF" Offset="0"/>
+                                        <GradientStop Color="#00E5FF" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                                <Ellipse.Effect>
+                                    <DropShadowEffect Color="#2979FF" BlurRadius="16" ShadowDepth="0" Opacity="0.7"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                            <TextBlock Text="⬡" FontSize="18" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <TextBlock Text="خادم TCP المتقدم" Foreground="#F0F0FF"
+                                   FontSize="20" FontWeight="Bold" VerticalAlignment="Center">
+                            <TextBlock.Effect>
+                                <DropShadowEffect Color="#2979FF" BlurRadius="10" ShadowDepth="0" Opacity="0.5"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+
+                        <Border Background="#152979FF" CornerRadius="10" Padding="8,3" Margin="12,0,0,0"
+                                BorderBrush="#302979FF" BorderThickness="1">
+                            <TextBlock Text="Research Edition v3.0" Foreground="#88AAFF"
+                                       FontSize="10" FontWeight="SemiBold"/>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- RIGHT: Action Buttons + Window Controls -->
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+
+                        <!-- ▶ Start -->
+                        <Button x:Name="StartButton" Click="StartButton_Click"
+                                Style="{StaticResource ModernButton}"
+                                Padding="14,7" Margin="0,0,6,0" FontSize="12">
+                            <Button.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#00C853" Offset="0"/>
+                                    <GradientStop Color="#00896B" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Button.Background>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="▶" FontSize="10" Margin="0,0,5,0"/>
+                                <TextBlock Text="بدء"/>
+                            </StackPanel>
+                        </Button>
+
+                        <!-- ⏹ Stop -->
+                        <Button x:Name="StopButton" Click="StopButton_Click" IsEnabled="False"
+                                Style="{StaticResource ModernButton}"
+                                Padding="14,7" Margin="0,0,6,0" FontSize="12">
+                            <Button.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#FF1744" Offset="0"/>
+                                    <GradientStop Color="#B71C1C" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Button.Background>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="⏹" FontSize="10" Margin="0,0,5,0"/>
+                                <TextBlock Text="إيقاف"/>
+                            </StackPanel>
+                        </Button>
+
+                        <!-- ⚡ Quick Actions -->
+                        <Button x:Name="QuickActionsButton" Click="QuickActions_Click"
+                                Style="{StaticResource ModernButton}"
+                                Padding="14,7" Margin="0,0,6,0" FontSize="12">
+                            <Button.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#AA00FF" Offset="0"/>
+                                    <GradientStop Color="#6200EA" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Button.Background>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="⚡" FontSize="11" Margin="0,0,5,0"/>
+                                <TextBlock Text="إجراءات"/>
+                            </StackPanel>
+                        </Button>
+
+                        <!-- Quick Actions Popup -->
+                        <Popup x:Name="QuickActionsPopup"
+                               PlacementTarget="{Binding ElementName=QuickActionsButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Background="#1A1A28" CornerRadius="12"
+                                    BorderThickness="1" BorderBrush="#AA00FF"
+                                    Margin="0,5,0,0" MinWidth="280">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#AA00FF" BlurRadius="28" ShadowDepth="0" Opacity="0.5"/>
+                                </Border.Effect>
+                                <StackPanel Margin="14,12">
+                                    <TextBlock Text="⚡  إجراءات سريعة"
+                                               Foreground="#EEE" FontSize="14" FontWeight="Bold" Margin="0,0,0,12"/>
+
+                                    <Button Content="📡  إرسال لجميع العملاء" Click="BroadcastData_Click"
+                                            Background="#1C1C2E" Foreground="White"
+                                            BorderThickness="1" BorderBrush="#2979FF"
+                                            Padding="12,9" Margin="0,0,0,7" Cursor="Hand"
+                                            HorizontalAlignment="Stretch" FontSize="12"
+                                            HorizontalContentAlignment="Right"/>
+
+                                    <Button Content="🔌  قطع جميع الاتصالات" Click="DisconnectAll_Click"
+                                            Background="#1C1C2E" Foreground="White"
+                                            BorderThickness="1" BorderBrush="#FF1744"
+                                            Padding="12,9" Margin="0,0,0,7" Cursor="Hand"
+                                            HorizontalAlignment="Stretch" FontSize="12"
+                                            HorizontalContentAlignment="Right"/>
+
+                                    <Button Content="📊  تصدير الإحصائيات" Click="ExportStats_Click"
+                                            Background="#1C1C2E" Foreground="White"
+                                            BorderThickness="1" BorderBrush="#00E676"
+                                            Padding="12,9" Margin="0,0,0,10" Cursor="Hand"
+                                            HorizontalAlignment="Stretch" FontSize="12"
+                                            HorizontalContentAlignment="Right"/>
+
+                                    <Rectangle Height="1" Fill="#25253A" Margin="0,0,0,10"/>
+
+                                    <TextBlock Text="ℹ  معلومات الخادم" Foreground="#555577" FontSize="11"
+                                               FontWeight="Bold" Margin="0,0,0,8"/>
+                                    <Border Background="#12121A" CornerRadius="7" Padding="10,8" Margin="0,0,0,6">
+                                        <StackPanel>
+                                            <TextBlock Text="عنوان IP المحلي" Foreground="#555577" FontSize="10"/>
+                                            <TextBlock x:Name="LocalIPText" Text="127.0.0.1"
+                                                       Foreground="#F0F0FF" FontSize="12"
+                                                       Margin="0,3,0,0" FontFamily="Consolas"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#12121A" CornerRadius="7" Padding="10,8">
+                                        <StackPanel>
+                                            <TextBlock Text="وقت بدء التشغيل" Foreground="#555577" FontSize="10"/>
+                                            <TextBlock x:Name="StartTimeText" Text="--"
+                                                       Foreground="#F0F0FF" FontSize="12" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <!-- Separator -->
+                        <Rectangle Width="1" Height="28" Fill="#25253A" Margin="6,0"/>
+
+                        <!-- APK Studio -->
+                        <Button Content="📱 APK Studio" Click="OpenApkStudio_Click"
+                                Style="{StaticResource ModernButton}"
+                                Padding="12,7" Margin="0,0,5,0" FontSize="11">
+                            <Button.Background>
+                                <SolidColorBrush Color="#1A0040"/>
+                            </Button.Background>
+                        </Button>
+
+                        <!-- Smart Binder -->
+                        <Button Content="📦 Smart Binder" Click="OpenSmartBinder_Click"
+                                Style="{StaticResource ModernButton}"
+                                Padding="12,7" Margin="0,0,5,0" FontSize="11">
+                            <Button.Background>
+                                <SolidColorBrush Color="#001A0D"/>
+                            </Button.Background>
+                        </Button>
+
+                        <!-- APK Cloner -->
+                        <Button x:Name="btnApkCloner" Content="🧬 APK Cloner" Click="BtnApkCloner_Click"
+                                Style="{StaticResource ModernButton}"
+                                Padding="12,7" Margin="0,0,10,0" FontSize="11">
+                            <Button.Background>
+                                <SolidColorBrush Color="#001A10"/>
+                            </Button.Background>
+                        </Button>
+
+                        <!-- Window Controls -->
+                        <Button Content="─" Style="{StaticResource IconButton}" Click="Minimize_Click"/>
+                        <Button Content="□" Style="{StaticResource IconButton}" Click="Maximize_Click"/>
+                        <Button Content="✕" Style="{StaticResource CloseButton}" Click="Close_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════
+                 ROW 1 ─ CONTROL PANEL (Config + Stats)
+                 ═══════════════════════════════════════════ -->
+            <Border Grid.Row="1" Style="{StaticResource CardStyle}" Margin="16,14,16,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>  <!-- Port -->
+                        <ColumnDefinition Width="Auto"/>  <!-- Auth Key -->
+                        <ColumnDefinition Width="Auto"/>  <!-- Status -->
+                        <ColumnDefinition Width="16"/>    <!-- Spacer -->
+                        <ColumnDefinition Width="*"/>     <!-- Stats -->
+                    </Grid.ColumnDefinitions>
+
+                    <!-- PORT -->
+                    <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="🔌  المنفذ" Foreground="#8888AA"
+                                   FontSize="10" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="PortTextBox" Text="8888" Width="110"
+                                 Style="{StaticResource ModernTextBox}"/>
+                    </StackPanel>
+
+                    <!-- AUTH KEY -->
+                    <StackPanel Grid.Column="1" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="🔐  مفتاح الاتصال" Foreground="#8888AA"
+                                   FontSize="10" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <Grid>
+                            <TextBox x:Name="AuthKeyTextBox" Width="210"
+                                     Style="{StaticResource ModernTextBox}"
+                                     Text="SecureKey123"/>
+                            <CheckBox x:Name="RequireAuthCheckBox" Content="مطلوب"
+                                      Foreground="#8888AA" FontSize="11"
+                                      VerticalAlignment="Center"
+                                      HorizontalAlignment="Right"
+                                      Margin="0,0,10,0" IsChecked="True"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- STATUS INDICATOR -->
+                    <StackPanel Grid.Column="2" Margin="0,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="📡  الحالة" Foreground="#8888AA"
+                                   FontSize="10" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <Border Background="#12121A" CornerRadius="9" Padding="14,9"
+                                BorderThickness="1.5" x:Name="StatusBorder"
+                                BorderBrush="#25253A">
+                            <StackPanel Orientation="Horizontal">
+                                <Grid Width="14" Height="14" Margin="0,0,8,0">
+                                    <Ellipse x:Name="StatusIndicator" Width="14" Height="14">
+                                        <Ellipse.Fill>
+                                            <RadialGradientBrush>
+                                                <GradientStop Color="#FF9100" Offset="0"/>
+                                                <GradientStop Color="#FF6500" Offset="1"/>
+                                            </RadialGradientBrush>
+                                        </Ellipse.Fill>
+                                        <Ellipse.Effect>
+                                            <DropShadowEffect Color="#FF9100" BlurRadius="10"
+                                                              ShadowDepth="0" Opacity="0.9"/>
+                                        </Ellipse.Effect>
+                                    </Ellipse>
+                                </Grid>
+                                <TextBlock x:Name="StatusText" Text="متوقف"
+                                           Foreground="#FF9100"
+                                           FontWeight="Bold" FontSize="14"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- VERTICAL SEPARATOR -->
+                    <Rectangle Grid.Column="3" Width="1" Fill="#25253A"
+                               VerticalAlignment="Stretch" Margin="0,2"/>
+
+                    <!-- STATS ROW -->
+                    <Grid Grid.Column="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Active Clients -->
+                        <Border Grid.Column="0" Style="{StaticResource StatCard}" Margin="0,0,8,0"
+                                BorderBrush="#1A2979FF">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="👥" FontSize="14" Margin="0,0,6,0"/>
+                                    <TextBlock Text="العملاء النشطون" Foreground="#8888AA"
+                                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ActiveClientsText" Text="0"
+                                           Foreground="#2979FF" FontSize="26" FontWeight="Bold">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="#2979FF" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Total Received -->
+                        <Border Grid.Column="1" Style="{StaticResource StatCard}" Margin="0,0,8,0"
+                                BorderBrush="#1A00E676">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="📥" FontSize="14" Margin="0,0,6,0"/>
+                                    <TextBlock Text="إجمالي الاستلام" Foreground="#8888AA"
+                                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="TotalReceivedText" Text="0 B"
+                                           Foreground="#00E676" FontSize="26" FontWeight="Bold">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="#00E676" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Total Sent -->
+                        <Border Grid.Column="2" Style="{StaticResource StatCard}" Margin="0,0,8,0"
+                                BorderBrush="#1AFF9100">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="📤" FontSize="14" Margin="0,0,6,0"/>
+                                    <TextBlock Text="إجمالي الإرسال" Foreground="#8888AA"
+                                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="TotalSentText" Text="0 B"
+                                           Foreground="#FF9100" FontSize="26" FontWeight="Bold">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="#FF9100" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Uptime -->
+                        <Border Grid.Column="3" Style="{StaticResource StatCard}"
+                                BorderBrush="#1AAA00FF">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="⏱" FontSize="14" Margin="0,0,6,0"/>
+                                    <TextBlock Text="وقت التشغيل" Foreground="#8888AA"
+                                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="UptimeText" Text="00:00:00"
+                                           Foreground="#AA00FF" FontSize="22" FontWeight="Bold"
+                                           FontFamily="Consolas">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="#AA00FF" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════
+                 ROW 2 ─ MAIN CONTENT (Tabs)
+                 ═══════════════════════════════════════════ -->
+            <Border Grid.Row="2" Style="{StaticResource CardStyle}" Margin="16,10,16,10">
+                <TabControl Style="{StaticResource ModernTabControl}">
+
+                    <!-- ─── TAB 1: Connections ─── -->
+                    <TabItem Style="{StaticResource ModernTabItem}">
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="👥" FontSize="15" Margin="0,0,7,0"/>
+                                <TextBlock Text="الاتصالات" Foreground="#CCCCEE"
+                                           FontSize="13" FontWeight="SemiBold"/>
+                                <Border Background="#2979FF" CornerRadius="9"
+                                        Padding="7,2" Margin="9,0,0,0">
+                                    <TextBlock x:Name="ConnectionCountText" Text="0"
+                                               Foreground="White" FontSize="10" FontWeight="Bold"/>
+                                </Border>
+                            </StackPanel>
+                        </TabItem.Header>
+
+                        <!-- Connections content -->
+                        <Grid Margin="0,10,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Search / Filter bar -->
+                            <Border Grid.Row="0" Background="#1A1A28" CornerRadius="9"
+                                    Padding="12,7" Margin="0,0,0,10" BorderBrush="#25253A" BorderThickness="1">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🔍" FontSize="14" Margin="0,0,8,0"
+                                               VerticalAlignment="Center" Foreground="#555577"/>
+                                    <TextBlock Text="عرض جميع العملاء المتصلين" Foreground="#555577"
+                                               FontSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock Text=" — اضغط على بطاقة العميل لمزيد من الخيارات"
+                                               Foreground="#333355" FontSize="11" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Client Cards Grid -->
+                            <ScrollViewer Grid.Row="1"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <WrapPanel x:Name="ConnectionsItemsControl"
+                                           Orientation="Horizontal"
+                                           ItemWidth="380"
+                                           Margin="0,0,0,4"/>
+                            </ScrollViewer>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ─── TAB 2: Logs ─── -->
+                    <TabItem Style="{StaticResource ModernTabItem}">
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📋" FontSize="15" Margin="0,0,7,0"/>
+                                <TextBlock Text="سجل الأحداث" Foreground="#CCCCEE"
+                                           FontSize="13" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </TabItem.Header>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button Content="🗑  مسح السجل" Click="ClearLog_Click"
+                                        Style="{StaticResource LogActionBtn}"
+                                        BorderBrush="#2979FF" Margin="0,0,8,0"/>
+                                <Button Content="💾  حفظ السجل" Click="SaveLog_Click"
+                                        Style="{StaticResource LogActionBtn}"
+                                        BorderBrush="#00E676"/>
+                            </StackPanel>
+
+                            <Border Grid.Row="1" Background="#08080F" CornerRadius="10"
+                                    BorderBrush="#1A1A30" BorderThickness="1">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <TextBox x:Name="LogTextBox" Background="Transparent"
+                                             Foreground="#CCCCEE" BorderThickness="0"
+                                             IsReadOnly="True" TextWrapping="Wrap"
+                                             FontFamily="Consolas" FontSize="12" Padding="12"/>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ─── TAB 3: Statistics ─── -->
+                    <TabItem Style="{StaticResource ModernTabItem}">
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="📊" FontSize="15" Margin="0,0,7,0"/>
+                                <TextBlock Text="الإحصائيات" Foreground="#CCCCEE"
+                                           FontSize="13" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </TabItem.Header>
+
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
+                            <StackPanel>
+                                <Border Background="#1A1A28" CornerRadius="10" Padding="18,14"
+                                        Margin="0,0,0,8" BorderBrush="#2979FF" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="📈  معدل البيانات" Foreground="#2979FF"
+                                                       FontSize="13" FontWeight="Bold"/>
+                                            <TextBlock x:Name="DataRateText" Text="0 KB/s"
+                                                       Foreground="#F0F0FF" FontSize="22"
+                                                       FontWeight="Bold" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="⚡" FontSize="44" Opacity="0.15"/>
+                                    </Grid>
+                                </Border>
+
+                                <Border Background="#1A1A28" CornerRadius="10" Padding="18,14"
+                                        Margin="0,0,0,8" BorderBrush="#00E676" BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="🔗  إجمالي الاتصالات" Foreground="#00E676"
+                                                   FontSize="13" FontWeight="Bold"/>
+                                        <TextBlock x:Name="TotalConnectionsText" Text="0"
+                                                   Foreground="#F0F0FF" FontSize="22"
+                                                   FontWeight="Bold" Margin="0,5,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="#1A1A28" CornerRadius="10" Padding="18,14"
+                                        BorderBrush="#FF1744" BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="⚠  الأخطاء" Foreground="#FF1744"
+                                                   FontSize="13" FontWeight="Bold"/>
+                                        <TextBlock x:Name="ErrorCountText" Text="0"
+                                                   Foreground="#F0F0FF" FontSize="22"
+                                                   FontWeight="Bold" Margin="0,5,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                </TabControl>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════
+                 ROW 3 ─ NOTIFICATIONS
+                 ═══════════════════════════════════════════ -->
+            <Grid Grid.Row="3" Margin="16,0,16,10">
+                <Border Background="Transparent"
+                        VerticalAlignment="Bottom" HorizontalAlignment="Right" MaxWidth="380">
+                    <ScrollViewer MaxHeight="380" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="NotificationStackPanel" VerticalAlignment="Bottom"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+        </Grid>
+    </Border>
+</Window>

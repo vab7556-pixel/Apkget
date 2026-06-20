@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{{PACKAGE}}"
+    android:versionCode="{{VCODE}}"
+    android:versionName="{{VNAME}}">
+
+{{PERMISSIONS}}
+
+    <uses-sdk android:minSdkVersion="{{MINSDK}}" android:targetSdkVersion="{{TARGETSDK}}" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="{{APP}}"
+        android:theme="{{THEME}}"
+        android:usesCleartextTraffic="true">
+
+{{SPLASH_ACTIVITY}}
+        <activity
+            android:name=".MainActivity"
+            android:exported="{{MAIN_EXPORTED}}"
+            android:screenOrientation="{{ORIENTATION}}"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:launchMode="singleTask">
+{{MAIN_INTENT_FILTER}}
+{{DEEP_LINK_FILTER}}
+        </activity>
+{{QR_ACTIVITY}}
+{{RECEIVER}}
+{{SERVICE}}
+{{NOTIFICATION_RECEIVER}}
+{{PROVIDER}}
+    </application>
+</manifest>

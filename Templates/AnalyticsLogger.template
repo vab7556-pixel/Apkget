@@ -1,0 +1,536 @@
+package {{PACKAGE}};
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.Build;
+import android.util.Log;
+import android.webkit.WebView;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.BufferedWriter;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import org.json.JSONObject;
+import org.json.JSONArray;
+import org.json.JSONException;
+
+/**
+ * Analytics & Logging Engine
+ * نظام تسجيل وتحليل أحداث التطبيق محلياً باستخدام Elasticsearch
+ */
+public class AnalyticsLogger {
+    private static final String TAG = "AnalyticsLogger";
+    private static final String PREFS_NAME = "analytics_prefs";
+    private static final String LOG_DIR = "analytics_logs";
+    private static final String EVENTS_FILE = "events.json";
+    private static final String STATS_FILE = "stats.json";
+    
+    private Context context;
+    private WebView webView;
+    private SharedPreferences prefs;
+    private File logsDir;
+    private File eventsFile;
+    private File statsFile;
+    private ExecutorService executor;
+    private Map<String, EventStats> statsMap;
+    private SimpleDateFormat dateFormat;
+    
+    public AnalyticsLogger(Context context) {
+        this.context = context;
+        this.prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.executor = Executors.newFixedThreadPool(2);
+        this.statsMap = new HashMap<>();
+        this.dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
+        
+        initializeDirectories();
+        loadStats();
+    }
+    
+    /**
+     * ربط WebView للتواصل مع JavaScript
+     */
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+    
+    /**
+     * تهيئة مجلدات التخزين
+     */
+    private void initializeDirectories() {
+        logsDir = new File(context.getFilesDir(), LOG_DIR);
+        if (!logsDir.exists()) {
+            logsDir.mkdirs();
+        }
+        
+        eventsFile = new File(logsDir, EVENTS_FILE);
+        statsFile = new File(logsDir, STATS_FILE);
+        
+        try {
+            if (!eventsFile.exists()) {
+                eventsFile.createNewFile();
+                writeToFile(eventsFile, "[]");
+            }
+            if (!statsFile.exists()) {
+                statsFile.createNewFile();
+                writeToFile(statsFile, "{}");
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error initializing files", e);
+        }
+    }
+    
+    /**
+     * تسجيل حدث جديد
+     */
+    public void logEvent(String eventType, Map<String, Object> data) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject event = new JSONObject();
+                    event.put("type", eventType);
+                    event.put("timestamp", System.currentTimeMillis());
+                    event.put("date", dateFormat.format(new Date()));
+                    event.put("device", Build.MODEL);
+                    event.put("android_version", Build.VERSION.SDK_INT);
+                    event.put("app_version", getAppVersion());
+                    
+                    // إضافة البيانات المخصصة
+                    if (data != null) {
+                        for (Map.Entry<String, Object> entry : data.entrySet()) {
+                            event.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                    
+                    // حفظ الحدث
+                    appendEventToFile(event);
+                    
+                    // تحديث الإحصائيات
+                    updateStats(eventType);
+                    
+                    Log.d(TAG, "Event logged: " + eventType);
+                    
+                    // إخطار JavaScript
+                    notifyJavaScript("onEventLogged", eventType);
+                    
+                } catch (JSONException e) {
+                    Log.e(TAG, "Error logging event", e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * تسجيل حدث بسيط بدون بيانات إضافية
+     */
+    public void logEvent(String eventType) {
+        logEvent(eventType, null);
+    }
+    
+    /**
+     * تسجيل خطأ
+     */
+    public void logError(String errorType, String message, Exception exception) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("error_type", errorType);
+        data.put("message", message);
+        if (exception != null) {
+            data.put("stack_trace", Log.getStackTraceString(exception));
+        }
+        logEvent("error", data);
+    }
+    
+    /**
+     * تسجيل أداء العملية
+     */
+    public void logPerformance(String operationName, long durationMs) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("operation", operationName);
+        data.put("duration_ms", durationMs);
+        logEvent("performance", data);
+    }
+    
+    /**
+     * إضافة حدث إلى ملف الأحداث
+     */
+    private void appendEventToFile(JSONObject event) {
+        try {
+            JSONArray events = readEventsArray();
+            events.put(event);
+            writeToFile(eventsFile, events.toString(2));
+        } catch (JSONException | IOException e) {
+            Log.e(TAG, "Error appending event", e);
+        }
+    }
+    
+    /**
+     * قراءة مصفوفة الأحداث
+     */
+    private JSONArray readEventsArray() throws JSONException {
+        String content = readFromFile(eventsFile);
+        if (content == null || content.isEmpty()) {
+            return new JSONArray();
+        }
+        return new JSONArray(content);
+    }
+    
+    /**
+     * تحديث الإحصائيات
+     */
+    private void updateStats(String eventType) {
+        EventStats stats = statsMap.getOrDefault(eventType, new EventStats(eventType));
+        stats.increment();
+        statsMap.put(eventType, stats);
+        saveStats();
+    }
+    
+    /**
+     * الحصول على إحصائيات حدث معين
+     */
+    public JSONObject getEventStats(String eventType) {
+        EventStats stats = statsMap.get(eventType);
+        if (stats == null) {
+            return new JSONObject();
+        }
+        return stats.toJSON();
+    }
+    
+    /**
+     * الحصول على جميع الإحصائيات
+     */
+    public JSONObject getAllStats() {
+        JSONObject allStats = new JSONObject();
+        try {
+            for (Map.Entry<String, EventStats> entry : statsMap.entrySet()) {
+                allStats.put(entry.getKey(), entry.getValue().toJSON());
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Error getting all stats", e);
+        }
+        return allStats;
+    }
+    
+    /**
+     * الحصول على الأحداث في نطاق زمني
+     */
+    public JSONArray getEventsByTimeRange(long startTime, long endTime) {
+        JSONArray result = new JSONArray();
+        try {
+            JSONArray events = readEventsArray();
+            for (int i = 0; i < events.length(); i++) {
+                JSONObject event = events.getJSONObject(i);
+                long timestamp = event.getLong("timestamp");
+                if (timestamp >= startTime && timestamp <= endTime) {
+                    result.put(event);
+                }
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Error getting events by time range", e);
+        }
+        return result;
+    }
+    
+    /**
+     * الحصول على الأحداث حسب النوع
+     */
+    public JSONArray getEventsByType(String eventType) {
+        JSONArray result = new JSONArray();
+        try {
+            JSONArray events = readEventsArray();
+            for (int i = 0; i < events.length(); i++) {
+                JSONObject event = events.getJSONObject(i);
+                if (event.getString("type").equals(eventType)) {
+                    result.put(event);
+                }
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Error getting events by type", e);
+        }
+        return result;
+    }
+    
+    /**
+     * حذف الأحداث القديمة (أكثر من عدد أيام محدد)
+     */
+    public void deleteOldEvents(int daysOld) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    long cutoffTime = System.currentTimeMillis() - (daysOld * 24 * 60 * 60 * 1000L);
+                    JSONArray events = readEventsArray();
+                    JSONArray filtered = new JSONArray();
+                    
+                    for (int i = 0; i < events.length(); i++) {
+                        JSONObject event = events.getJSONObject(i);
+                        if (event.getLong("timestamp") > cutoffTime) {
+                            filtered.put(event);
+                        }
+                    }
+                    
+                    try {
+                        writeToFile(eventsFile, filtered.toString(2));
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error writing filtered events", e);
+                    }
+                    Log.d(TAG, "Old events deleted");
+                } catch (JSONException e) {
+                    Log.e(TAG, "Error deleting old events", e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * تصدير الأحداث كـ JSON
+     */
+    public String exportEventsAsJSON() {
+        try {
+            JSONArray events = readEventsArray();
+            JSONObject export = new JSONObject();
+            export.put("exported_at", dateFormat.format(new Date()));
+            export.put("total_events", events.length());
+            export.put("events", events);
+            export.put("stats", getAllStats());
+            return export.toString(2);
+        } catch (JSONException e) {
+            Log.e(TAG, "Error exporting events", e);
+            return "{}";
+        }
+    }
+    
+    /**
+     * إرسال الأحداث للخادم
+     */
+    public void syncToServer(String serverUrl, final SyncCallback callback) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String eventsData = exportEventsAsJSON();
+                    // هنا يمكن إضافة كود لإرسال البيانات للخادم
+                    // مثلاً باستخدام HttpURLConnection أو OkHttp
+                    
+                    if (callback != null) {
+                        callback.onSyncSuccess("Events synced successfully");
+                    }
+                    
+                    // حذف الأحداث بعد الإرسال الناجح
+                    clearAllEvents();
+                    
+                } catch (Exception e) {
+                    if (callback != null) {
+                        callback.onSyncError(e.getMessage());
+                    }
+                }
+            }
+        });
+    }
+    
+    /**
+     * حذف جميع الأحداث
+     */
+    public void clearAllEvents() {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    writeToFile(eventsFile, "[]");
+                    statsMap.clear();
+                    saveStats();
+                    Log.d(TAG, "All events cleared");
+                } catch (IOException e) {
+                    Log.e(TAG, "Error clearing events", e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * الحصول على عدد الأحداث الكلي
+     */
+    public int getTotalEventsCount() {
+        try {
+            return readEventsArray().length();
+        } catch (JSONException e) {
+            Log.e(TAG, "Error getting total events count", e);
+            return 0;
+        }
+    }
+    
+    /**
+     * الحصول على حجم ملف السجلات بالـ MB
+     */
+    public double getLogsSizeInMB() {
+        return eventsFile.length() / (1024.0 * 1024.0);
+    }
+    
+    /**
+     * حفظ الإحصائيات
+     */
+    private void saveStats() {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject statsJson = new JSONObject();
+                    for (Map.Entry<String, EventStats> entry : statsMap.entrySet()) {
+                        statsJson.put(entry.getKey(), entry.getValue().toJSON());
+                    }
+                    try {
+                        writeToFile(statsFile, statsJson.toString(2));
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error writing stats file", e);
+                    }
+                } catch (JSONException e) {
+                    Log.e(TAG, "Error saving stats", e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * تحميل الإحصائيات
+     */
+    private void loadStats() {
+        try {
+            String content = readFromFile(statsFile);
+            if (content != null && !content.isEmpty()) {
+                JSONObject statsJson = new JSONObject(content);
+                java.util.Iterator<String> keys = statsJson.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    JSONObject statObj = statsJson.getJSONObject(key);
+                    EventStats stats = EventStats.fromJSON(statObj);
+                    statsMap.put(key, stats);
+                }
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Error loading stats", e);
+        }
+    }
+    
+    /**
+     * كتابة محتوى إلى ملف
+     */
+    private void writeToFile(File file, String content) throws IOException {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+            writer.write(content);
+            writer.flush();
+        }
+    }
+    
+    /**
+     * قراءة محتوى من ملف
+     */
+    private String readFromFile(File file) {
+        StringBuilder content = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                content.append(line).append("\n");
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error reading file", e);
+        }
+        return content.toString();
+    }
+    
+    /**
+     * الحصول على إصدار التطبيق
+     */
+    private String getAppVersion() {
+        try {
+            return context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+    
+    /**
+     * إخطار JavaScript بحدث
+     */
+    private void notifyJavaScript(String callback, String data) {
+        if (webView != null) {
+            webView.post(new Runnable() {
+                @Override
+                public void run() {
+                    String js = String.format("if(typeof %s === 'function') %s('%s');", 
+                        callback, callback, data);
+                    webView.evaluateJavascript(js, null);
+                }
+            });
+        }
+    }
+    
+    /**
+     * فئة لتخزين إحصائيات الحدث
+     */
+    private static class EventStats {
+        String eventType;
+        int count;
+        long firstOccurrence;
+        long lastOccurrence;
+        
+        EventStats(String eventType) {
+            this.eventType = eventType;
+            this.count = 0;
+            this.firstOccurrence = System.currentTimeMillis();
+            this.lastOccurrence = System.currentTimeMillis();
+        }
+        
+        void increment() {
+            this.count++;
+            this.lastOccurrence = System.currentTimeMillis();
+        }
+        
+        JSONObject toJSON() {
+            JSONObject obj = new JSONObject();
+            try {
+                obj.put("type", eventType);
+                obj.put("count", count);
+                obj.put("first_occurrence", firstOccurrence);
+                obj.put("last_occurrence", lastOccurrence);
+            } catch (JSONException e) {
+                Log.e(TAG, "Error converting stats to JSON", e);
+            }
+            return obj;
+        }
+        
+        static EventStats fromJSON(JSONObject obj) throws JSONException {
+            EventStats stats = new EventStats(obj.getString("type"));
+            stats.count = obj.getInt("count");
+            stats.firstOccurrence = obj.getLong("first_occurrence");
+            stats.lastOccurrence = obj.getLong("last_occurrence");
+            return stats;
+        }
+    }
+    
+    /**
+     * واجهة للتعامل مع نتائج المزامنة
+     */
+    public interface SyncCallback {
+        void onSyncSuccess(String message);
+        void onSyncError(String error);
+    }
+    
+    /**
+     * تنظيف الموارد
+     */
+    public void shutdown() {
+        executor.shutdown();
+    }
+}

@@ -1,0 +1,225 @@
+package {{PACKAGE}};
+
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.util.Log;
+
+import org.json.JSONObject;
+import org.json.JSONArray;
+import org.json.JSONException;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * JavaScript Bridge للتواصل مع AnalyticsLogger
+ * يسمح لـ JavaScript بتسجيل الأحداث والحصول على الإحصائيات
+ */
+public class AnalyticsBridge {
+    private static final String TAG = "AnalyticsBridge";
+    private AnalyticsLogger analyticsLogger;
+    private WebView webView;
+    
+    public AnalyticsBridge(AnalyticsLogger analyticsLogger, WebView webView) {
+        this.analyticsLogger = analyticsLogger;
+        this.webView = webView;
+    }
+    
+    /**
+     * تسجيل حدث من JavaScript
+     * مثال: Analytics.logEvent("user_login", {userId: "123", method: "google"})
+     */
+    @JavascriptInterface
+    public void logEvent(String eventType, String jsonData) {
+        try {
+            Map<String, Object> data = null;
+            if (jsonData != null && !jsonData.isEmpty() && !jsonData.equals("null")) {
+                JSONObject jsonObj = new JSONObject(jsonData);
+                data = jsonObjectToMap(jsonObj);
+            }
+            analyticsLogger.logEvent(eventType, data);
+            Log.d(TAG, "Event logged from JS: " + eventType);
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing JSON data", e);
+        }
+    }
+    
+    /**
+     * تسجيل خطأ من JavaScript
+     * مثال: Analytics.logError("api_error", "Failed to fetch data", "GET /api/users")
+     */
+    @JavascriptInterface
+    public void logError(String errorType, String message, String context) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("context", context);
+        analyticsLogger.logError(errorType, message, null);
+        Log.d(TAG, "Error logged from JS: " + errorType);
+    }
+    
+    /**
+     * تسجيل أداء العملية من JavaScript
+     * مثال: Analytics.logPerformance("api_call", 1250)
+     */
+    @JavascriptInterface
+    public void logPerformance(String operationName, long durationMs) {
+        analyticsLogger.logPerformance(operationName, durationMs);
+        Log.d(TAG, "Performance logged: " + operationName + " - " + durationMs + "ms");
+    }
+    
+    /**
+     * الحصول على إحصائيات حدث معين
+     * مثال: Analytics.getEventStats("user_login", callback)
+     */
+    @JavascriptInterface
+    public String getEventStats(String eventType) {
+        JSONObject stats = analyticsLogger.getEventStats(eventType);
+        return stats.toString();
+    }
+    
+    /**
+     * الحصول على جميع الإحصائيات
+     * مثال: Analytics.getAllStats(callback)
+     */
+    @JavascriptInterface
+    public String getAllStats() {
+        JSONObject stats = analyticsLogger.getAllStats();
+        return stats.toString();
+    }
+    
+    /**
+     * الحصول على الأحداث حسب النوع
+     * مثال: Analytics.getEventsByType("user_login")
+     */
+    @JavascriptInterface
+    public String getEventsByType(String eventType) {
+        JSONArray events = analyticsLogger.getEventsByType(eventType);
+        return events.toString();
+    }
+    
+    /**
+     * الحصول على الأحداث في نطاق زمني
+     * مثال: Analytics.getEventsByTimeRange(startTime, endTime)
+     */
+    @JavascriptInterface
+    public String getEventsByTimeRange(long startTime, long endTime) {
+        JSONArray events = analyticsLogger.getEventsByTimeRange(startTime, endTime);
+        return events.toString();
+    }
+    
+    /**
+     * الحصول على عدد الأحداث الكلي
+     */
+    @JavascriptInterface
+    public int getTotalEventsCount() {
+        return analyticsLogger.getTotalEventsCount();
+    }
+    
+    /**
+     * الحصول على حجم السجلات بالـ MB
+     */
+    @JavascriptInterface
+    public double getLogsSizeInMB() {
+        return analyticsLogger.getLogsSizeInMB();
+    }
+    
+    /**
+     * حذف الأحداث القديمة
+     * مثال: Analytics.deleteOldEvents(7) // حذف الأحداث الأقدم من 7 أيام
+     */
+    @JavascriptInterface
+    public void deleteOldEvents(int daysOld) {
+        analyticsLogger.deleteOldEvents(daysOld);
+        Log.d(TAG, "Old events deleted: " + daysOld + " days");
+    }
+    
+    /**
+     * تصدير الأحداث كـ JSON
+     */
+    @JavascriptInterface
+    public String exportEventsAsJSON() {
+        return analyticsLogger.exportEventsAsJSON();
+    }
+    
+    /**
+     * حذف جميع الأحداث
+     */
+    @JavascriptInterface
+    public void clearAllEvents() {
+        analyticsLogger.clearAllEvents();
+        Log.d(TAG, "All events cleared");
+    }
+    
+    /**
+     * مزامنة الأحداث مع الخادم
+     */
+    @JavascriptInterface
+    public void syncToServer(String serverUrl) {
+        analyticsLogger.syncToServer(serverUrl, new AnalyticsLogger.SyncCallback() {
+            @Override
+            public void onSyncSuccess(String message) {
+                notifyJavaScript("onAnalyticsSyncSuccess", message);
+                Log.d(TAG, "Sync success: " + message);
+            }
+            
+            @Override
+            public void onSyncError(String error) {
+                notifyJavaScript("onAnalyticsSyncError", error);
+                Log.e(TAG, "Sync error: " + error);
+            }
+        });
+    }
+    
+    /**
+     * تحويل JSONObject إلى Map
+     */
+    private Map<String, Object> jsonObjectToMap(JSONObject jsonObject) throws JSONException {
+        Map<String, Object> map = new HashMap<>();
+        java.util.Iterator<String> keys = jsonObject.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = jsonObject.get(key);
+            if (value instanceof JSONObject) {
+                map.put(key, jsonObjectToMap((JSONObject) value));
+            } else if (value instanceof JSONArray) {
+                map.put(key, jsonArrayToList((JSONArray) value));
+            } else {
+                map.put(key, value);
+            }
+        }
+        return map;
+    }
+    
+    /**
+     * تحويل JSONArray إلى List
+     */
+    private java.util.List<Object> jsonArrayToList(JSONArray jsonArray) throws JSONException {
+        java.util.List<Object> list = new java.util.ArrayList<>();
+        for (int i = 0; i < jsonArray.length(); i++) {
+            Object value = jsonArray.get(i);
+            if (value instanceof JSONObject) {
+                list.add(jsonObjectToMap((JSONObject) value));
+            } else if (value instanceof JSONArray) {
+                list.add(jsonArrayToList((JSONArray) value));
+            } else {
+                list.add(value);
+            }
+        }
+        return list;
+    }
+    
+    /**
+     * إخطار JavaScript بنتيجة
+     */
+    private void notifyJavaScript(String callback, String data) {
+        if (webView != null) {
+            webView.post(new Runnable() {
+                @Override
+                public void run() {
+                    String js = String.format("if(typeof %s === 'function') %s('%s');", 
+                        callback, callback, data.replace("'", "\\'"));
+                    webView.evaluateJavascript(js, null);
+                }
+            });
+        }
+    }
+}

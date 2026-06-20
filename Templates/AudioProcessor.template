@@ -1,0 +1,747 @@
+package {{PACKAGE}};
+
+import android.app.Activity;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.AudioTrack;
+import android.media.MediaRecorder;
+import android.media.audiofx.BassBoost;
+import android.media.audiofx.Equalizer;
+import android.media.audiofx.PresetReverb;
+import android.media.audiofx.Virtualizer;
+import android.media.audiofx.Visualizer;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
+import android.media.audiofx.AutomaticGainControl;
+import android.os.Build;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import android.widget.Toast;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Audio Processor - {{APP}}
+ * Real-time audio processing with Android AudioFX
+ * 
+ * === Audio Effects (for playback) ===
+ * AudioFX.attachToPlayer(audioSessionId);
+ * AudioFX.enableEqualizer(true);
+ * AudioFX.setEqualizerPreset(preset); // 0-9 or custom
+ * AudioFX.setEqualizerBand(band, level); // band: 0-4, level: -1500 to 1500
+ * AudioFX.enableBassBoost(true);
+ * AudioFX.setBassBoostStrength(strength); // 0-1000
+ * AudioFX.enableVirtualizer(true);
+ * AudioFX.setVirtualizerStrength(strength); // 0-1000
+ * AudioFX.enableReverb(true);
+ * AudioFX.setReverbPreset(preset); // none, smallroom, mediumroom, largeroom, mediumhall, largehall, plate
+ * 
+ * === Audio Visualization ===
+ * AudioFX.startVisualization(audioSessionId, callback);
+ * AudioFX.stopVisualization();
+ * AudioFX.getWaveform(); // returns byte array as JSON
+ * AudioFX.getFFT(); // returns frequency data as JSON
+ * 
+ * === Audio Recording with Effects ===
+ * AudioFX.startRecording(filename, enableNoiseSuppression, enableEchoCancellation);
+ * AudioFX.stopRecording();
+ * AudioFX.isRecording();
+ * 
+ * === Audio Analysis ===
+ * AudioFX.getAudioLevel(); // current amplitude
+ * AudioFX.getPeakLevel();
+ * 
+ * === Info ===
+ * AudioFX.getEqualizerPresets();
+ * AudioFX.getEqualizerBands();
+ * AudioFX.isEffectSupported(effectType);
+ */
+public class AudioProcessor {
+    private Activity activity;
+    private WebView webView;
+    private Handler mainHandler;
+    private ExecutorService executor;
+    
+    // Audio Effects
+    private Equalizer equalizer;
+    private BassBoost bassBoost;
+    private Virtualizer virtualizer;
+    private PresetReverb reverb;
+    private Visualizer visualizer;
+    
+    // Recording
+    private AudioRecord audioRecord;
+    private NoiseSuppressor noiseSuppressor;
+    private AcousticEchoCanceler echoCanceler;
+    private AutomaticGainControl gainControl;
+    
+    // State
+    private int currentAudioSessionId = 0;
+    private boolean isRecording = false;
+    private boolean isVisualizing = false;
+    private String visualizationCallback;
+    private String currentRecordingPath;
+    
+    // Visualization data
+    private byte[] waveformData;
+    private byte[] fftData;
+    private int peakLevel = 0;
+    
+    private static final String APP_FOLDER = "{{APP}}";
+    private static final int SAMPLE_RATE = 44100;
+    private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
+    private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
+
+    public AudioProcessor(Activity activity) {
+        this.activity = activity;
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.executor = Executors.newSingleThreadExecutor();
+    }
+
+    public void setWebView(WebView webView) {
+        this.webView = webView;
+    }
+
+    private File getAppFolder() {
+        File folder = new File(Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_MUSIC), APP_FOLDER);
+        if (!folder.exists()) folder.mkdirs();
+        return folder;
+    }
+
+    // ==================== ATTACH TO PLAYER ====================
+
+    @JavascriptInterface
+    public boolean attachToPlayer(int audioSessionId) {
+        try {
+            this.currentAudioSessionId = audioSessionId;
+            releaseEffects();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ==================== EQUALIZER ====================
+
+    @JavascriptInterface
+    public boolean enableEqualizer(boolean enable) {
+        try {
+            if (enable) {
+                if (equalizer == null) {
+                    equalizer = new Equalizer(0, currentAudioSessionId);
+                }
+                equalizer.setEnabled(true);
+            } else if (equalizer != null) {
+                equalizer.setEnabled(false);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean setEqualizerPreset(int preset) {
+        try {
+            if (equalizer == null) {
+                equalizer = new Equalizer(0, currentAudioSessionId);
+                equalizer.setEnabled(true);
+            }
+            if (preset >= 0 && preset < equalizer.getNumberOfPresets()) {
+                equalizer.usePreset((short) preset);
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean setEqualizerBand(int band, int level) {
+        try {
+            if (equalizer == null) {
+                equalizer = new Equalizer(0, currentAudioSessionId);
+                equalizer.setEnabled(true);
+            }
+            short[] range = equalizer.getBandLevelRange();
+            level = Math.max(range[0], Math.min(range[1], level));
+            equalizer.setBandLevel((short) band, (short) level);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public String getEqualizerPresets() {
+        try {
+            if (equalizer == null) {
+                equalizer = new Equalizer(0, currentAudioSessionId);
+            }
+            StringBuilder json = new StringBuilder("[");
+            short numPresets = equalizer.getNumberOfPresets();
+            for (short i = 0; i < numPresets; i++) {
+                if (i > 0) json.append(",");
+                json.append("{\"index\":").append(i);
+                json.append(",\"name\":\"").append(equalizer.getPresetName(i)).append("\"}");
+            }
+            json.append("]");
+            return json.toString();
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    @JavascriptInterface
+    public String getEqualizerBands() {
+        try {
+            if (equalizer == null) {
+                equalizer = new Equalizer(0, currentAudioSessionId);
+            }
+            StringBuilder json = new StringBuilder("{");
+            
+            short[] levelRange = equalizer.getBandLevelRange();
+            json.append("\"minLevel\":").append(levelRange[0]);
+            json.append(",\"maxLevel\":").append(levelRange[1]);
+            
+            short numBands = equalizer.getNumberOfBands();
+            json.append(",\"bands\":[");
+            
+            for (short i = 0; i < numBands; i++) {
+                if (i > 0) json.append(",");
+                int[] freqRange = equalizer.getBandFreqRange(i);
+                int centerFreq = equalizer.getCenterFreq(i);
+                short level = equalizer.getBandLevel(i);
+                
+                json.append("{\"index\":").append(i);
+                json.append(",\"minFreq\":").append(freqRange[0]);
+                json.append(",\"maxFreq\":").append(freqRange[1]);
+                json.append(",\"centerFreq\":").append(centerFreq);
+                json.append(",\"level\":").append(level).append("}");
+            }
+            
+            json.append("]}");
+            return json.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    // ==================== BASS BOOST ====================
+
+    @JavascriptInterface
+    public boolean enableBassBoost(boolean enable) {
+        try {
+            if (enable) {
+                if (bassBoost == null) {
+                    bassBoost = new BassBoost(0, currentAudioSessionId);
+                }
+                bassBoost.setEnabled(true);
+            } else if (bassBoost != null) {
+                bassBoost.setEnabled(false);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean setBassBoostStrength(int strength) {
+        try {
+            if (bassBoost == null) {
+                bassBoost = new BassBoost(0, currentAudioSessionId);
+                bassBoost.setEnabled(true);
+            }
+            strength = Math.max(0, Math.min(1000, strength));
+            bassBoost.setStrength((short) strength);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ==================== VIRTUALIZER ====================
+
+    @JavascriptInterface
+    public boolean enableVirtualizer(boolean enable) {
+        try {
+            if (enable) {
+                if (virtualizer == null) {
+                    virtualizer = new Virtualizer(0, currentAudioSessionId);
+                }
+                virtualizer.setEnabled(true);
+            } else if (virtualizer != null) {
+                virtualizer.setEnabled(false);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean setVirtualizerStrength(int strength) {
+        try {
+            if (virtualizer == null) {
+                virtualizer = new Virtualizer(0, currentAudioSessionId);
+                virtualizer.setEnabled(true);
+            }
+            strength = Math.max(0, Math.min(1000, strength));
+            virtualizer.setStrength((short) strength);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ==================== REVERB ====================
+
+    @JavascriptInterface
+    public boolean enableReverb(boolean enable) {
+        try {
+            if (enable) {
+                if (reverb == null) {
+                    reverb = new PresetReverb(0, currentAudioSessionId);
+                }
+                reverb.setEnabled(true);
+            } else if (reverb != null) {
+                reverb.setEnabled(false);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public boolean setReverbPreset(String preset) {
+        try {
+            if (reverb == null) {
+                reverb = new PresetReverb(0, currentAudioSessionId);
+                reverb.setEnabled(true);
+            }
+            
+            short presetValue;
+            switch (preset.toLowerCase()) {
+                case "smallroom": presetValue = PresetReverb.PRESET_SMALLROOM; break;
+                case "mediumroom": presetValue = PresetReverb.PRESET_MEDIUMROOM; break;
+                case "largeroom": presetValue = PresetReverb.PRESET_LARGEROOM; break;
+                case "mediumhall": presetValue = PresetReverb.PRESET_MEDIUMHALL; break;
+                case "largehall": presetValue = PresetReverb.PRESET_LARGEHALL; break;
+                case "plate": presetValue = PresetReverb.PRESET_PLATE; break;
+                case "none":
+                default: presetValue = PresetReverb.PRESET_NONE; break;
+            }
+            
+            reverb.setPreset(presetValue);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ==================== VISUALIZATION ====================
+
+    @JavascriptInterface
+    public boolean startVisualization(int audioSessionId, String callback) {
+        try {
+            this.visualizationCallback = callback;
+            
+            if (visualizer != null) {
+                visualizer.release();
+            }
+            
+            visualizer = new Visualizer(audioSessionId);
+            visualizer.setCaptureSize(Visualizer.getCaptureSizeRange()[1]);
+            
+            waveformData = new byte[visualizer.getCaptureSize()];
+            fftData = new byte[visualizer.getCaptureSize()];
+            
+            visualizer.setDataCaptureListener(new Visualizer.OnDataCaptureListener() {
+                @Override
+                public void onWaveFormDataCapture(Visualizer vis, byte[] waveform, int samplingRate) {
+                    waveformData = waveform;
+                    updatePeakLevel(waveform);
+                    if (visualizationCallback != null) {
+                        fireVisualizationCallback("waveform");
+                    }
+                }
+
+                @Override
+                public void onFftDataCapture(Visualizer vis, byte[] fft, int samplingRate) {
+                    fftData = fft;
+                    if (visualizationCallback != null) {
+                        fireVisualizationCallback("fft");
+                    }
+                }
+            }, Visualizer.getMaxCaptureRate() / 2, true, true);
+            
+            visualizer.setEnabled(true);
+            isVisualizing = true;
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @JavascriptInterface
+    public void stopVisualization() {
+        isVisualizing = false;
+        if (visualizer != null) {
+            visualizer.setEnabled(false);
+            visualizer.release();
+            visualizer = null;
+        }
+    }
+
+    @JavascriptInterface
+    public String getWaveform() {
+        if (waveformData == null) return "[]";
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < waveformData.length; i++) {
+            if (i > 0) json.append(",");
+            json.append(waveformData[i] & 0xFF);
+        }
+        json.append("]");
+        return json.toString();
+    }
+
+    @JavascriptInterface
+    public String getFFT() {
+        if (fftData == null) return "[]";
+        
+        // Convert to magnitude spectrum
+        int n = fftData.length / 2;
+        StringBuilder json = new StringBuilder("[");
+        
+        for (int i = 0; i < n; i++) {
+            if (i > 0) json.append(",");
+            // Real and imaginary parts
+            float re = fftData[2 * i];
+            float im = fftData[2 * i + 1];
+            // Magnitude
+            float magnitude = (float) Math.sqrt(re * re + im * im);
+            json.append((int) magnitude);
+        }
+        
+        json.append("]");
+        return json.toString();
+    }
+
+    private void updatePeakLevel(byte[] waveform) {
+        int max = 0;
+        for (byte b : waveform) {
+            int val = Math.abs(b);
+            if (val > max) max = val;
+        }
+        peakLevel = max;
+    }
+
+    private void fireVisualizationCallback(final String type) {
+        if (webView == null || visualizationCallback == null) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                String js = "javascript:" + visualizationCallback + "(\"" + type + "\")";
+                webView.evaluateJavascript(js, null);
+            }
+        });
+    }
+
+    // ==================== RECORDING WITH EFFECTS ====================
+
+    @JavascriptInterface
+    public boolean startRecording(String filename, boolean enableNS, boolean enableAEC) {
+        if (isRecording) return false;
+        
+        try {
+            int bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize * 2);
+            
+            int sessionId = audioRecord.getAudioSessionId();
+            
+            // Enable noise suppression
+            if (enableNS && NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(sessionId);
+                if (noiseSuppressor != null) {
+                    noiseSuppressor.setEnabled(true);
+                }
+            }
+            
+            // Enable echo cancellation
+            if (enableAEC && AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(sessionId);
+                if (echoCanceler != null) {
+                    echoCanceler.setEnabled(true);
+                }
+            }
+            
+            // Enable automatic gain control
+            if (AutomaticGainControl.isAvailable()) {
+                gainControl = AutomaticGainControl.create(sessionId);
+                if (gainControl != null) {
+                    gainControl.setEnabled(true);
+                }
+            }
+            
+            // Prepare output file
+            if (filename == null || filename.isEmpty()) {
+                filename = "REC_" + new SimpleDateFormat("yyyyMMdd_HHmmss",
+                    Locale.US).format(new Date()) + ".wav";
+            }
+            File outputFile = new File(getAppFolder(), filename);
+            currentRecordingPath = outputFile.getAbsolutePath();
+            
+            isRecording = true;
+            audioRecord.startRecording();
+            
+            // Start recording thread
+            final int finalBufferSize = bufferSize;
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    writeWavFile(finalBufferSize);
+                }
+            });
+            
+            return true;
+        } catch (Exception e) {
+            isRecording = false;
+            return false;
+        }
+    }
+
+    private void writeWavFile(int bufferSize) {
+        try {
+            FileOutputStream fos = new FileOutputStream(currentRecordingPath);
+            
+            // Write WAV header placeholder
+            byte[] header = new byte[44];
+            fos.write(header);
+            
+            byte[] buffer = new byte[bufferSize];
+            int totalBytes = 0;
+            
+            while (isRecording) {
+                int read = audioRecord.read(buffer, 0, bufferSize);
+                if (read > 0) {
+                    fos.write(buffer, 0, read);
+                    totalBytes += read;
+                }
+            }
+            
+            fos.close();
+            
+            // Update WAV header with correct sizes
+            updateWavHeader(currentRecordingPath, totalBytes);
+            
+        } catch (Exception e) {}
+    }
+
+    private void updateWavHeader(String filePath, int totalAudioLen) {
+        try {
+            RandomAccessFile raf = new RandomAccessFile(filePath, "rw");
+            
+            int totalDataLen = totalAudioLen + 36;
+            int channels = 1;
+            int byteRate = SAMPLE_RATE * channels * 2;
+            
+            byte[] header = new byte[44];
+            
+            // RIFF header
+            header[0] = 'R'; header[1] = 'I'; header[2] = 'F'; header[3] = 'F';
+            header[4] = (byte) (totalDataLen & 0xff);
+            header[5] = (byte) ((totalDataLen >> 8) & 0xff);
+            header[6] = (byte) ((totalDataLen >> 16) & 0xff);
+            header[7] = (byte) ((totalDataLen >> 24) & 0xff);
+            
+            // WAVE header
+            header[8] = 'W'; header[9] = 'A'; header[10] = 'V'; header[11] = 'E';
+            
+            // fmt chunk
+            header[12] = 'f'; header[13] = 'm'; header[14] = 't'; header[15] = ' ';
+            header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0; // chunk size
+            header[20] = 1; header[21] = 0; // PCM format
+            header[22] = (byte) channels; header[23] = 0;
+            header[24] = (byte) (SAMPLE_RATE & 0xff);
+            header[25] = (byte) ((SAMPLE_RATE >> 8) & 0xff);
+            header[26] = (byte) ((SAMPLE_RATE >> 16) & 0xff);
+            header[27] = (byte) ((SAMPLE_RATE >> 24) & 0xff);
+            header[28] = (byte) (byteRate & 0xff);
+            header[29] = (byte) ((byteRate >> 8) & 0xff);
+            header[30] = (byte) ((byteRate >> 16) & 0xff);
+            header[31] = (byte) ((byteRate >> 24) & 0xff);
+            header[32] = (byte) (channels * 2); header[33] = 0; // block align
+            header[34] = 16; header[35] = 0; // bits per sample
+            
+            // data chunk
+            header[36] = 'd'; header[37] = 'a'; header[38] = 't'; header[39] = 'a';
+            header[40] = (byte) (totalAudioLen & 0xff);
+            header[41] = (byte) ((totalAudioLen >> 8) & 0xff);
+            header[42] = (byte) ((totalAudioLen >> 16) & 0xff);
+            header[43] = (byte) ((totalAudioLen >> 24) & 0xff);
+            
+            raf.seek(0);
+            raf.write(header);
+            raf.close();
+        } catch (Exception e) {}
+    }
+
+    @JavascriptInterface
+    public String stopRecording() {
+        isRecording = false;
+        
+        try {
+            if (audioRecord != null) {
+                audioRecord.stop();
+                audioRecord.release();
+                audioRecord = null;
+            }
+            if (noiseSuppressor != null) {
+                noiseSuppressor.release();
+                noiseSuppressor = null;
+            }
+            if (echoCanceler != null) {
+                echoCanceler.release();
+                echoCanceler = null;
+            }
+            if (gainControl != null) {
+                gainControl.release();
+                gainControl = null;
+            }
+        } catch (Exception e) {}
+        
+        return currentRecordingPath;
+    }
+
+    @JavascriptInterface
+    public boolean isRecording() {
+        return isRecording;
+    }
+
+    // ==================== AUDIO ANALYSIS ====================
+
+    @JavascriptInterface
+    public int getAudioLevel() {
+        if (audioRecord != null && isRecording) {
+            return peakLevel;
+        }
+        return 0;
+    }
+
+    @JavascriptInterface
+    public int getPeakLevel() {
+        return peakLevel;
+    }
+
+    // ==================== INFO ====================
+
+    @JavascriptInterface
+    public String isEffectSupported(String effectType) {
+        StringBuilder json = new StringBuilder("{");
+        
+        switch (effectType.toLowerCase()) {
+            case "equalizer":
+                json.append("\"supported\":true");
+                break;
+            case "bassboost":
+                json.append("\"supported\":true");
+                break;
+            case "virtualizer":
+                json.append("\"supported\":true");
+                break;
+            case "reverb":
+                json.append("\"supported\":true");
+                break;
+            case "noisesuppressor":
+                json.append("\"supported\":").append(NoiseSuppressor.isAvailable());
+                break;
+            case "echocanceler":
+                json.append("\"supported\":").append(AcousticEchoCanceler.isAvailable());
+                break;
+            case "autogaincontrol":
+                json.append("\"supported\":").append(AutomaticGainControl.isAvailable());
+                break;
+            default:
+                json.append("\"supported\":false");
+        }
+        
+        json.append("}");
+        return json.toString();
+    }
+
+    @JavascriptInterface
+    public String getAudioCapabilities() {
+        StringBuilder json = new StringBuilder("{");
+        
+        json.append("\"noiseSuppressor\":").append(NoiseSuppressor.isAvailable());
+        json.append(",\"echoCanceler\":").append(AcousticEchoCanceler.isAvailable());
+        json.append(",\"autoGainControl\":").append(AutomaticGainControl.isAvailable());
+        json.append(",\"sampleRate\":").append(SAMPLE_RATE);
+        json.append(",\"visualizerMaxCaptureRate\":").append(Visualizer.getMaxCaptureRate());
+        
+        int[] captureRange = Visualizer.getCaptureSizeRange();
+        json.append(",\"visualizerCaptureRange\":{\"min\":").append(captureRange[0]);
+        json.append(",\"max\":").append(captureRange[1]).append("}");
+        
+        json.append("}");
+        return json.toString();
+    }
+
+    // ==================== CLEANUP ====================
+
+    private void releaseEffects() {
+        try {
+            if (equalizer != null) { equalizer.release(); equalizer = null; }
+            if (bassBoost != null) { bassBoost.release(); bassBoost = null; }
+            if (virtualizer != null) { virtualizer.release(); virtualizer = null; }
+            if (reverb != null) { reverb.release(); reverb = null; }
+        } catch (Exception e) {}
+    }
+
+    public void destroy() {
+        isRecording = false;
+        stopVisualization();
+        releaseEffects();
+        
+        try {
+            if (audioRecord != null) {
+                audioRecord.release();
+                audioRecord = null;
+            }
+            if (noiseSuppressor != null) {
+                noiseSuppressor.release();
+                noiseSuppressor = null;
+            }
+            if (echoCanceler != null) {
+                echoCanceler.release();
+                echoCanceler = null;
+            }
+            if (gainControl != null) {
+                gainControl.release();
+                gainControl = null;
+            }
+        } catch (Exception e) {}
+        
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+}
